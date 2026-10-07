@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { VelaReceipt } from "../types";
+import type { VelaReceipt, DecisionReceipt } from "../types";
+
+type AnyReceipt = DecisionReceipt | VelaReceipt;
 
 interface ReceiptsState {
-  receipts: VelaReceipt[];
-  addReceipt: (receipt: VelaReceipt) => void;
+  receipts: AnyReceipt[];
+  addReceipt: (receipt: AnyReceipt) => void;
   clearReceipts: () => void;
 }
 

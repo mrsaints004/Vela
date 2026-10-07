@@ -4,13 +4,15 @@ import { useState } from "react";
 import { useReceiptsStore } from "@/lib/stores/receipts";
 import { ReceiptList } from "@/components/receipts/ReceiptList";
 import { ReceiptDetail } from "@/components/receipts/ReceiptDetail";
-import type { VelaReceipt } from "@/lib/types";
+import type { VelaReceipt, DecisionReceipt } from "@/lib/types";
 import { FileText, ArrowRight } from "lucide-react";
 import Link from "next/link";
 
+type AnyReceipt = DecisionReceipt | VelaReceipt;
+
 export default function ReceiptsPage() {
   const { receipts } = useReceiptsStore();
-  const [selected, setSelected] = useState<VelaReceipt | null>(null);
+  const [selected, setSelected] = useState<AnyReceipt | null>(null);
 
   if (receipts.length === 0) {
     return (
@@ -20,12 +22,12 @@ export default function ReceiptsPage() {
             <FileText className="w-7 h-7 text-text-muted" />
           </div>
           <h2 className="text-xl font-semibold text-text-primary mb-2">
-            No execution receipts yet
+            No decision receipts yet
           </h2>
           <p className="text-sm text-text-muted mb-6 max-w-md mx-auto leading-relaxed">
-            Every trade you execute through Vela generates a verifiable receipt
-            with a complete audit trail — intent, selection reasoning, simulation results,
-            and final execution details.
+            Every trade generates a decision receipt — the full trail from intent
+            to policy evaluation to execution. See what the agent considered,
+            why it chose a provider, which policy checks passed, and what happened.
           </p>
           <Link
             href="/"
@@ -44,11 +46,11 @@ export default function ReceiptsPage() {
       {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-text-primary tracking-tight mb-1">
-          Execution Receipts
+          Decision Receipts
         </h1>
         <p className="text-sm text-text-muted">
           <span className="font-mono text-text-secondary">{receipts.length}</span> receipt{receipts.length !== 1 ? "s" : ""} —
-          each with full audit trail from intent to execution.
+          full decision trail from intent through policy evaluation to execution.
         </p>
       </div>
 

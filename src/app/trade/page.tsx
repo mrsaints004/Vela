@@ -11,7 +11,7 @@ import { RiskFlags } from "@/components/trade/RiskFlags";
 import { ExecutionFlow } from "@/components/trade/ExecutionFlow";
 import { PriceChart } from "@/components/trade/PriceChart";
 import { SkeletonBlock } from "@/components/shared/SkeletonLoader";
-import { AlertCircle, RotateCcw, Zap, Search, Layers, ShieldCheck, Clock, Wallet } from "lucide-react";
+import { AlertCircle, RotateCcw, Search, Layers, ShieldCheck, Clock, Wallet, Zap, Bot, Type } from "lucide-react";
 import { useWalletStore } from "@/lib/stores/wallet";
 
 function TradePageInner() {
@@ -19,11 +19,13 @@ function TradePageInner() {
   const ticker = searchParams.get("ticker");
 
   const {
-    step, intent, representations, costs, recommendation, factors,
-    selectedProvider, selectedTokenAddress, quote, simulation, policy,
+    step, intent, intentMethod, representations, costs, recommendation, factors,
+    selectedProvider, selectedTokenAddress, quote, simulation,
+    policyEvaluation, policy,
     referencePrice, marketStatus, receipt, error, execution,
-    executionMode, agenticPlan,
-    submitIntent, selectProvider, fetchQuoteAndSimulate, approve, execute, setExecutionMode, reset,
+    executionMode, agenticPlan, selectionReasoning,
+    submitIntent, selectProvider, fetchQuoteAndSimulate, approve, execute,
+    setExecutionMode, setPolicyPreset, updatePolicyField, reset,
   } = useTradeStore();
 
   const { connected, connect, connecting } = useWalletStore();
@@ -36,16 +38,18 @@ function TradePageInner() {
   }, [ticker]);
 
   const isIdle = step === "idle";
-  const isDiscovering = step === "discovering" || step === "parsing";
+  const isParsing = step === "parsing";
+  const isDiscovering = step === "discovering" || isParsing;
   const hasResults = representations.length > 0;
-  const isInExecution = ["quoting", "simulating", "approving", "executing", "receipt"].includes(step);
+  const isInExecution = [
+    "quoting", "simulating", "evaluating",
+    "awaiting-approval", "executing", "verifying", "receipt",
+  ].includes(step);
 
-  // Input is always editable — submitting a new intent auto-resets
   const inputDisabled = step === "executing" || step === "discovering" || step === "parsing";
 
   function handleNewIntent(raw: string) {
     if (step !== "idle" && step !== "error" && step !== "receipt" && step !== "comparing") {
-      // If mid-execution, reset first
       reset();
     }
     submitIntent(raw);
@@ -55,9 +59,14 @@ function TradePageInner() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-lg font-semibold text-text-primary tracking-tight">
-          Trade
-        </h1>
+        <div>
+          <h1 className="text-lg font-semibold text-text-primary tracking-tight">
+            Trade
+          </h1>
+          <p className="text-xs text-text-muted mt-0.5">
+            Policy-bounded execution for tokenized equities
+          </p>
+        </div>
         {step !== "idle" && (
           <button
             onClick={reset}
@@ -69,12 +78,15 @@ function TradePageInner() {
         )}
       </div>
 
-      {/* Intent Input */}
+      {/* Intent Input with Policy Config */}
       <div className="mb-6">
         <IntentInput
           onSubmit={handleNewIntent}
           disabled={inputDisabled}
           initialTicker={ticker}
+          policy={policy}
+          onPolicyPreset={setPolicyPreset}
+          onPolicyFieldChange={updatePolicyField}
         />
       </div>
 
@@ -91,14 +103,22 @@ function TradePageInner() {
 
       {/* Loading skeleton */}
       {isDiscovering && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <SkeletonBlock lines={4} />
-            <SkeletonBlock lines={6} />
-          </div>
-          <div className="space-y-4">
-            <SkeletonBlock lines={3} />
-            <SkeletonBlock lines={5} />
+        <div className="space-y-4">
+          {isParsing && (
+            <div className="flex items-center gap-2 text-xs text-text-muted">
+              <Bot className="w-3.5 h-3.5 text-accent animate-pulse" />
+              <span>Parsing intent with AI...</span>
+            </div>
+          )}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-4">
+              <SkeletonBlock lines={4} />
+              <SkeletonBlock lines={6} />
+            </div>
+            <div className="space-y-4">
+              <SkeletonBlock lines={3} />
+              <SkeletonBlock lines={5} />
+            </div>
           </div>
         </div>
       )}
@@ -108,8 +128,8 @@ function TradePageInner() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
           {[
             { icon: Search, title: "Discover", desc: "Finds every tokenized version across bStocks, Ondo, xStocks." },
-            { icon: Layers, title: "Compare", desc: "Ranks by effective cost — deviation, slippage, liquidity." },
-            { icon: ShieldCheck, title: "Verify", desc: "Simulates on-chain, checks policy, generates receipt." },
+            { icon: Layers, title: "Evaluate", desc: "Checks your policy constraints — deviation, slippage, concentration, liquidity." },
+            { icon: ShieldCheck, title: "Execute", desc: "Autonomously when policy permits. Manual approval when it doesn't." },
           ].map(({ icon: Icon, title, desc }) => (
             <div key={title} className="bg-surface-1 border border-border rounded-xl p-4">
               <Icon className="w-4 h-4 text-text-muted mb-2" />
@@ -136,6 +156,9 @@ function TradePageInner() {
                 </p>
                 <p className="text-xs text-text-muted mt-0.5">
                   On-chain prices may diverge from the last reference. Effective cost includes an uncertainty penalty.
+                  {policy?.blockAfterHours && (
+                    <span className="text-loss"> Your policy blocks after-hours execution.</span>
+                  )}
                 </p>
               </div>
             </div>
@@ -151,6 +174,28 @@ function TradePageInner() {
                 <span className="font-mono">${intent.amount.toLocaleString()}</span>
                 <span>·</span>
                 <span>{representations.length} providers</span>
+                {intentMethod && (
+                  <>
+                    <span>·</span>
+                    <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded ${
+                      intentMethod === "ai"
+                        ? "bg-accent/10 text-accent"
+                        : "bg-surface-2 text-text-muted"
+                    }`}>
+                      {intentMethod === "ai" ? <Bot className="w-2.5 h-2.5" /> : <Type className="w-2.5 h-2.5" />}
+                      {intentMethod === "ai" ? "AI parsed" : "regex"}
+                    </span>
+                  </>
+                )}
+                {policyEvaluation?.canExecuteAutonomously && (
+                  <>
+                    <span>·</span>
+                    <span className="flex items-center gap-1 text-accent">
+                      <Zap className="w-3 h-3" />
+                      Auto
+                    </span>
+                  </>
+                )}
               </div>
             )}
 
@@ -164,6 +209,18 @@ function TradePageInner() {
                 if (rep) selectProvider(provider, rep.tokenAddress);
               }}
             />
+
+            {/* Selection Reasoning */}
+            {selectionReasoning && selectedProvider && (
+              <div className="bg-surface-1 border border-border rounded-xl p-3">
+                <div className="text-[10px] text-text-muted uppercase tracking-wider mb-1.5">
+                  Selection Reasoning
+                </div>
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  {selectionReasoning}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Right sidebar */}
@@ -172,13 +229,24 @@ function TradePageInner() {
               <RecommendationBar recommendation={recommendation} factors={factors} />
             )}
 
-            {policy && <RiskFlags policy={policy} />}
+            <RiskFlags policyEvaluation={policyEvaluation} />
 
             {/* Execution mode toggle */}
             {step === "comparing" && selectedProvider && (
               <div className="bg-surface-1 border border-border rounded-xl p-3">
                 <div className="text-xs text-text-muted mb-2">Execution via</div>
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => setExecutionMode("agentic")}
+                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
+                      executionMode === "agentic"
+                        ? "bg-accent/10 text-accent border border-accent/20"
+                        : "text-text-muted border border-transparent hover:text-text-secondary"
+                    }`}
+                  >
+                    <Zap className="w-3 h-3" />
+                    Agentic
+                  </button>
                   <button
                     onClick={() => setExecutionMode("wallet")}
                     className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
@@ -189,20 +257,12 @@ function TradePageInner() {
                   >
                     MetaMask
                   </button>
-                  <button
-                    onClick={() => setExecutionMode("agentic")}
-                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
-                      executionMode === "agentic"
-                        ? "bg-accent/10 text-accent border border-accent/20"
-                        : "text-text-muted border border-transparent hover:text-text-secondary"
-                    }`}
-                  >
-                    Agentic Wallet
-                  </button>
                 </div>
                 {executionMode === "agentic" && (
                   <p className="text-[10px] text-text-muted mt-1.5 leading-relaxed">
-                    AI execution layer: approve → swap → verify pipeline
+                    {policy?.autonomousExecution
+                      ? "Auto-executes when all policy checks pass. Asks approval otherwise."
+                      : "Builds execution plan via agentic pipeline. Requires your approval."}
                   </p>
                 )}
               </div>
@@ -215,7 +275,7 @@ function TradePageInner() {
                   <span className="text-sm text-text-primary font-medium">Wallet not connected</span>
                 </div>
                 <p className="text-xs text-text-muted mb-3">
-                  Connect your wallet for accurate quotes and to execute trades. You can still preview quotes without one.
+                  Connect your wallet for accurate quotes and to execute trades.
                 </p>
                 <button
                   onClick={connect}
@@ -232,7 +292,7 @@ function TradePageInner() {
                 onClick={fetchQuoteAndSimulate}
                 className="w-full py-3 rounded-xl text-sm font-medium transition-colors bg-accent text-bg-primary hover:bg-accent/90"
               >
-                Get Quote & Simulate
+                Get Quote & Evaluate
               </button>
             )}
 
@@ -240,17 +300,30 @@ function TradePageInner() {
               step={step}
               quote={quote}
               simulation={simulation}
-              policy={policy}
-              onApprove={() => { approve(); execute(); }}
+              policyEvaluation={policyEvaluation}
+              onApprove={approve}
               onExecute={execute}
               txHash={execution?.txHash || null}
+              executionMode={executionMode}
             />
 
             {step === "receipt" && receipt && (
               <div className="bg-surface-1 border border-border rounded-xl px-4 py-3 text-center">
-                <span className="text-xs font-mono text-text-muted">{receipt.id}</span>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  {receipt.executionMode === "autonomous" && (
+                    <Zap className="w-3 h-3 text-accent" />
+                  )}
+                  <span className="text-xs font-mono text-text-muted">{receipt.id}</span>
+                </div>
+                <div className="text-[10px] text-text-muted mb-1">
+                  {receipt.executionMode === "autonomous"
+                    ? "Executed autonomously"
+                    : receipt.executionMode === "manual"
+                    ? "Executed with manual approval"
+                    : "Execution blocked"}
+                </div>
                 <a href="/receipts" className="block mt-1 text-xs text-accent hover:underline">
-                  View receipts &rarr;
+                  View decision receipts &rarr;
                 </a>
               </div>
             )}

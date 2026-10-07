@@ -1,17 +1,24 @@
 "use client";
 
-import type { VelaReceipt } from "@/lib/types";
+import type { VelaReceipt, DecisionReceipt } from "@/lib/types";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { NumberDisplay } from "@/components/shared/NumberDisplay";
 import { StatusDot } from "@/components/shared/StatusDot";
+import { Zap } from "lucide-react";
+
+type AnyReceipt = DecisionReceipt | VelaReceipt;
+
+function isDecisionReceipt(r: AnyReceipt): r is DecisionReceipt {
+  return "policySnapshot" in r;
+}
 
 interface ReceiptListProps {
-  receipts: VelaReceipt[];
-  onSelect: (receipt: VelaReceipt) => void;
+  receipts: AnyReceipt[];
+  onSelect: (receipt: AnyReceipt) => void;
 }
 
 export function ReceiptList({ receipts, onSelect }: ReceiptListProps) {
-  const columns: Column<VelaReceipt>[] = [
+  const columns: Column<AnyReceipt>[] = [
     {
       key: "timestamp",
       label: "Time",
@@ -63,14 +70,41 @@ export function ReceiptList({ receipts, onSelect }: ReceiptListProps) {
         ),
     },
     {
+      key: "mode",
+      label: "Mode",
+      align: "center",
+      render: (row) => {
+        if (isDecisionReceipt(row)) {
+          return row.executionMode === "autonomous" ? (
+            <Zap className="w-3 h-3 text-accent mx-auto" />
+          ) : (
+            <span className="text-[10px] text-text-muted">manual</span>
+          );
+        }
+        return <span className="text-text-muted text-xs">—</span>;
+      },
+    },
+    {
       key: "policy",
       label: "Policy",
       align: "center",
-      render: (row) => (
-        <StatusDot
-          status={row.policy.action === "allow" ? "active" : row.policy.action === "warn" ? "warning" : "fail"}
-        />
-      ),
+      render: (row) => {
+        if (isDecisionReceipt(row)) {
+          return (
+            <StatusDot
+              status={
+                row.policyEvaluation.action === "allow" ? "active" :
+                row.policyEvaluation.action === "warn" ? "warning" : "fail"
+              }
+            />
+          );
+        }
+        return (
+          <StatusDot
+            status={row.policy.action === "allow" ? "active" : row.policy.action === "warn" ? "warning" : "fail"}
+          />
+        );
+      },
     },
     {
       key: "execution",
@@ -91,7 +125,7 @@ export function ReceiptList({ receipts, onSelect }: ReceiptListProps) {
         columns={columns}
         data={receipts}
         onRowClick={onSelect}
-        emptyMessage="No receipts yet. Execute a trade to generate one."
+        emptyMessage="No decision receipts yet. Execute a trade to generate one."
       />
     </div>
   );

@@ -10,7 +10,10 @@ import {
   buildDiscoveredRepresentations,
   generateRecommendation,
 } from "@/lib/engine/comparison";
-import { evaluatePolicy } from "@/lib/engine/policy";
+import { evaluatePolicy, evaluatePolicyV2 } from "@/lib/engine/policy";
+import { createPolicyFromPreset } from "@/lib/engine/policy-compiler";
+import { buildRepresentationsConsidered, buildSelectionReasoning } from "@/lib/engine/receipt";
+import type { ExecutionPolicy } from "@/lib/types";
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,10 +22,13 @@ export async function POST(request: NextRequest) {
 
     // --- Discover: find representations, compare, recommend, policy ---
     if (action === "discover") {
-      const { ticker, amount } = body;
+      const { ticker, amount, policy: clientPolicy } = body;
       if (!ticker) {
         return NextResponse.json({ error: "ticker is required" }, { status: 400 });
       }
+
+      // Use client-provided policy or default to moderate
+      const policy: ExecutionPolicy = clientPolicy || createPolicyFromPreset("moderate");
 
       const tokens = await findRepresentations(ticker);
       if (tokens.length === 0) {
@@ -80,9 +86,11 @@ export async function POST(request: NextRequest) {
         finalMarketStatus
       );
 
-      // Run policy evaluation with recommended provider
+      // Run policy evaluation with user-defined policy
       const selectedProvider = recommended?.provider || (costs[0]?.provider ?? "");
-      const policy = evaluatePolicy({
+
+      const policyEvaluation = evaluatePolicyV2({
+        policy,
         marketStatus: finalMarketStatus,
         costs,
         representations,
@@ -91,13 +99,26 @@ export async function POST(request: NextRequest) {
         referencePrice,
       });
 
+      // Build representations considered for decision receipt
+      const representationsConsidered = buildRepresentationsConsidered(
+        discovered, costs, selectedProvider
+      );
+
+      // Build selection reasoning
+      const selectionReasoning = buildSelectionReasoning(
+        selectedProvider, costs, finalMarketStatus, referencePrice
+      );
+
       return NextResponse.json({
         representations: discovered,
         costs,
         recommendation,
         factors,
         recommended,
-        policy,
+        policy: { action: policyEvaluation.action, checks: policyEvaluation.checks },
+        policyEvaluation,
+        representationsConsidered,
+        selectionReasoning,
         marketStatus: finalMarketStatus,
         referencePrice,
         enrichment: authTokens.length > 0
@@ -111,9 +132,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // --- Full flow: quote + simulate + policy ---
+    // --- Full flow: quote + simulate + policy-evaluate ---
     if (action === "full-flow") {
-      const { ticker, provider, tokenAddress, amount, walletAddress } = body;
+      const { ticker, provider, tokenAddress, amount, walletAddress, policy: clientPolicy } = body;
       if (!ticker || !provider || !tokenAddress || !amount) {
         return NextResponse.json(
           { error: "ticker, provider, tokenAddress, and amount are required" },
@@ -121,6 +142,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      const policy: ExecutionPolicy = clientPolicy || createPolicyFromPreset("moderate");
       const wallet = walletAddress || "0x0000000000000000000000000000000000000001";
 
       // Get quote
@@ -176,28 +198,46 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Re-evaluate policy with simulation result
+      // Evaluate against user's policy
       const tokens = await findRepresentations(ticker);
       const representations = await fetchRepresentations(tokens);
       const referencePrice = await getReferencePrice(ticker);
       const costs = calculateEffectiveCosts(representations, referencePrice ?? undefined);
       const marketStatus = getMarketStatus();
 
-      const policy = evaluatePolicy({
+      const policyEvaluation = evaluatePolicyV2({
+        policy,
         marketStatus,
         costs,
         representations,
         selectedProvider: provider,
         amount: parseFloat(amount),
         simulation,
+        quote,
         referencePrice,
       });
+
+      // Build txData for agentic execution path
+      let txData = null;
+      if (quote && policyEvaluation.action !== "block") {
+        try {
+          const swapResult = await buildSwap(tokenAddress, amount, wallet, quote.quoteId);
+          txData = {
+            to: swapResult.swap.to,
+            data: swapResult.swap.data,
+            value: swapResult.swap.value,
+          };
+        } catch {
+          // txData remains null
+        }
+      }
 
       return NextResponse.json({
         quote,
         quoteError,
         simulation,
-        policy,
+        policyEvaluation,
+        txData,
       });
     }
 
@@ -330,7 +370,20 @@ export async function POST(request: NextRequest) {
       const { executeAgenticPlan } = await import("@/lib/api/agentic-wallet");
       const result = await executeAgenticPlan(plan, { tokenAddress, amount, walletAddress, quoteId });
 
-      return NextResponse.json(result);
+      // Include the built txData so the client can sign it
+      let txData = null;
+      try {
+        const swapResult = await buildSwap(tokenAddress, amount, walletAddress, quoteId);
+        txData = {
+          to: swapResult.swap.to,
+          data: swapResult.swap.data,
+          value: swapResult.swap.value,
+        };
+      } catch {
+        // txData remains null
+      }
+
+      return NextResponse.json({ ...result, txData });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });

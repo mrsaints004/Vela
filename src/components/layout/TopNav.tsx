@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "/markets", label: "Markets" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/receipts", label: "Receipts" },
+  { href: "/agent", label: "Agent" },
 ] as const;
 
 export function TopNav() {
