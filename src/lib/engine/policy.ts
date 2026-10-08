@@ -10,6 +10,7 @@ import type {
   SimulationSnapshot,
   QuoteSnapshot,
 } from "../types";
+import { createPolicyFromPreset } from "./policy-compiler";
 
 const LIQUIDITY_RANK: Record<string, number> = {
   none: 0,
@@ -302,8 +303,6 @@ export function evaluatePolicy(opts: {
   simulation?: SimulationSnapshot | null;
   referencePrice?: number | null;
 }): PolicyResult {
-  const { POLICY_PRESETS } = require("../types");
-  const { createPolicyFromPreset } = require("./policy-compiler");
   const defaultPolicy = createPolicyFromPreset("moderate");
 
   const evaluation = evaluatePolicyV2({

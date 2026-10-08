@@ -35,6 +35,7 @@ function TradePageInner() {
     if (ticker && step === "idle") {
       submitIntent(`Buy $500 of ${ticker}`);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker]);
 
   const isIdle = step === "idle";

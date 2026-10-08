@@ -10,10 +10,11 @@ Tokenized equities landed on-chain faster than the tooling did. NVDA can differ 
 
 ## What Vela Does
 
-1. **Discover** — Type a natural-language intent (e.g. "Buy $500 of NVDA"). Vela finds every tokenized version across providers on BSC.
+1. **Discover** — Type a natural-language intent (e.g. "Buy $500 of NVDA" or "invest 2k in Apple"). AI parses your intent via Groq LLM, with regex fallback. Vela finds every tokenized version across providers on BSC.
 2. **Compare** — Each provider ranked by effective execution cost: price deviation from reference, slippage (from DEX aggregator quotes), liquidity depth, and gas.
 3. **Simulate** — Policy engine checks market hours, deviation thresholds, volume, and honeypot risk. Transaction simulated on-chain via the Transaction API before signing.
-4. **Execute & Receipt** — Wallet signs the swap. Vela generates a verifiable receipt: intent, alternatives considered, reasoning, simulation result, and on-chain outcome.
+4. **Execute & Receipt** — Autonomous execution when all policy checks pass, manual approval otherwise. Verifiable decision receipt: intent, alternatives considered, reasoning, simulation result, and on-chain outcome.
+5. **Agent Identity** — On-chain agent registration via ERC-8004 (BNB Agent Studio). Agent identity embedded in decision receipts for verifiable provenance.
 
 ## Architecture
 
@@ -52,6 +53,8 @@ Tokenized equities landed on-chain faster than the tooling did. NVDA can differ 
 | **Trading API** | DEX aggregator quotes, swap building, approval checks |
 | **Transaction API** | On-chain simulation before execution |
 | **Wallet API** | Portfolio balances and positions |
+| **Agentic Wallet** | Multi-step execution pipeline: approve, quote, swap, simulate, verify |
+| **ERC-8004 (Agent Studio)** | On-chain agent identity registration, capability metadata, verifiable decision receipts |
 
 ## Setup
 
@@ -78,16 +81,20 @@ Open [http://localhost:3000](http://localhost:3000).
 ```
 BINANCE_WEB3_API_KEY=your_api_key
 BINANCE_WEB3_SECRET_KEY=your_secret_key
+GROQ_API_KEY=your_groq_key  # Optional — enables AI intent parsing
 ```
 
 ## Key Features
 
 - **Cross-provider comparison**: Automatically discovers and ranks all tokenized representations of a stock
 - **Market-hours awareness**: Detects stale reference prices during weekends/after-hours and applies uncertainty penalties
-- **Policy engine**: Multi-check firewall (market status, price deviation, liquidity, volume, slippage, simulation, honeypot) with allow/warn/block actions
-- **Verifiable receipts**: Full audit trail of every trade decision — what was asked, what was chosen, why, and what happened
+- **AI intent parsing**: Natural language trade intents parsed via Groq LLM with triple fallback (AI → server regex → client regex)
+- **Policy engine**: 12-check firewall (market status, deviation, liquidity, volume, slippage, concentration, daily limit, simulation, honeypot) with autonomous/manual/block actions
+- **Autonomous execution**: When all policy checks pass, trades execute without manual approval
+- **Verifiable decision receipts**: Full audit trail — intent, alternatives considered, policy evaluation, simulation result, agent identity, and on-chain outcome
+- **ERC-8004 agent identity**: On-chain agent registration via BNB Agent Studio, embedded in decision receipts
 - **Flight recorder**: Logs every API call with latency and errors for developer experience analysis
-- **MetaMask execution**: Direct wallet signing for on-chain swaps via DEX aggregation
+- **Dual execution**: Agentic Wallet pipeline or direct MetaMask signing
 
 ## Tech Stack
 

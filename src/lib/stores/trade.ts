@@ -1,13 +1,11 @@
 import { create } from "zustand";
 import type {
-  TradeFlowStep,
   TradeFlowStepV2,
   TradeIntent,
   DiscoveredRepresentation,
   QuoteSnapshot,
   SimulationSnapshot,
   ExecutionSnapshot,
-  PolicyResult,
   PolicyEvaluation,
   ExecutionPolicy,
   RecommendationFactor,
@@ -19,7 +17,7 @@ import type {
   RepresentationConsidered,
 } from "../types";
 import { parseIntent } from "../engine/intent";
-import { createPolicyFromPreset, compilePolicyFromIntent } from "../engine/policy-compiler";
+import { createPolicyFromPreset } from "../engine/policy-compiler";
 import { useAgentStore } from "./agent";
 import { IDENTITY_REGISTRY, IDENTITY_REGISTRY_TESTNET } from "../agent-studio/erc8004";
 
@@ -376,13 +374,14 @@ export const useTradeStore = create<TradeState>((set, get) => ({
                   const receipt = await tx.wait();
                   executionStatus = receipt?.status === 1 ? "confirmed" : "failed";
                 } catch {
-                  // If wallet signing fails, record what the agentic pipeline built
-                  txHash = result.finalTxHash || null;
-                  executionStatus = result.status === "completed" ? "confirmed" : "failed";
+                  // Wallet signing failed — no on-chain tx occurred
+                  txHash = null;
+                  executionStatus = "failed";
                 }
               } else {
-                txHash = result.finalTxHash || null;
-                executionStatus = result.status === "completed" ? "confirmed" : "failed";
+                // No wallet available — pipeline ran but no tx was signed
+                txHash = null;
+                executionStatus = "failed";
               }
 
               set({ agenticPlan: { ...plan, steps: result.steps } });

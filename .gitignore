@@ -19,10 +19,12 @@
 
 # production
 /build
+/dist
 
 # misc
 .DS_Store
 *.pem
+Thumbs.db
 
 # local data (receipts, flight recorder exports)
 /.data/
@@ -33,11 +35,14 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
+# env files (API keys, secrets)
+.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
+.env*.local
 
 # vercel
 .vercel
@@ -45,3 +50,24 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude / AI tooling
+AGENTS.md
+.claude/
+.claude.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+# package lock (keep package-lock.json, ignore others)
+yarn.lock
+pnpm-lock.yaml
