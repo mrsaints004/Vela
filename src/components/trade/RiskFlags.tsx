@@ -105,7 +105,7 @@ function PolicyEvaluationView({ evaluation }: { evaluation: PolicyEvaluation }) 
         ) : (
           <div className="flex items-center gap-1.5">
             <Shield className="w-3 h-3 text-text-muted" />
-            <span className="text-xs text-text-secondary">Awaiting manual approval</span>
+            <span className="text-xs text-text-secondary">{evaluation.reasoning.startsWith('Discovery only.') ? 'Discovery checks only — execution not evaluated' : 'Awaiting manual approval'}</span>
           </div>
         )}
         <p className="text-[10px] text-text-muted mt-1 leading-relaxed">

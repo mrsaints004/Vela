@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev": "node scripts/serve-local.cjs dev",
+    "build": "next build --webpack",
+    "start": "node scripts/serve-local.cjs start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit --incremental false",
+    "test": "node --require ./tests/register.cjs --test tests/*.test.cjs",
+    "agentic:install": "node scripts/install-agentic.cjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",

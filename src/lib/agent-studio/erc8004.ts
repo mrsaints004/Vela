@@ -1,4 +1,5 @@
-import { BrowserProvider, Contract, toUtf8Bytes, toUtf8String, AbiCoder } from "ethers";
+import {walletSigner} from '../browser-wallet';
+import { Contract, toUtf8Bytes, toUtf8String } from "ethers";
 
 // ERC-8004 IdentityRegistry — same address on BSC mainnet & all EVM chains
 export const IDENTITY_REGISTRY = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432";
@@ -56,17 +57,23 @@ export async function registerAgent(
   metadata: AgentMetadata,
   useTestnet = false
 ): Promise<{ agentId: number; txHash: string }> {
-  if (typeof window === "undefined" || !(window as any).ethereum) {
+  if (typeof window === "undefined" || !window.ethereum) {
     throw new Error("Wallet not available");
   }
 
-  const provider = new BrowserProvider((window as any).ethereum);
-  const signer = await provider.getSigner();
+  const {signer,provider,address} = await walletSigner(useTestnet ? 97 : 56);
+  if(await provider.getBalance(address)===0n) throw new Error("You need BNB on the selected network for identity registration gas.");
   const registryAddress = getRegistry(useTestnet);
+  if(await provider.getCode(registryAddress)==="0x") throw new Error("IdentityRegistry contract is unavailable on this network.");
   const contract = new Contract(registryAddress, IDENTITY_ABI, signer);
 
   // Build the agent URI as a data URI containing JSON metadata
-  const agentURI = `data:application/json;base64,${btoa(JSON.stringify({
+  const agentURI = `data:application/json;base64,${utf8Base64(JSON.stringify({
+    type: "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+    active: false,
+    x402Support: false,
+    services: [],
+    supportedTrust: [],
     name: metadata.name,
     description: metadata.description,
     capabilities: metadata.capabilities,
@@ -77,7 +84,6 @@ export async function registerAgent(
     providers: ["bStocks", "Ondo", "xStocks"],
   }))}`;
 
-  const coder = AbiCoder.defaultAbiCoder();
 
   // Build metadata entries
   const metadataEntries = [
@@ -102,13 +108,14 @@ export async function registerAgent(
   // Call register(string, tuple[])
   const tx = await contract["register(string,(string,bytes)[])"](agentURI, metadataEntries);
   const receipt = await tx.wait();
+  if (!receipt || receipt.status !== 1) throw new Error("Agent registration did not confirm.");
 
   // Extract agent ID from Transfer event
-  let agentId = 0;
+  let agentId: number|null = null;
   for (const log of receipt.logs) {
     try {
       const parsed = contract.interface.parseLog({ topics: [...log.topics], data: log.data });
-      if (parsed && parsed.name === "Transfer") {
+      if (log.address.toLowerCase()===registryAddress.toLowerCase() && parsed && parsed.name === "Transfer" && /^0x0{40}$/i.test(String(parsed.args[0])) && String(parsed.args[1]).toLowerCase()===address.toLowerCase()) {
         agentId = Number(parsed.args[2]); // tokenId
         break;
       }
@@ -117,6 +124,7 @@ export async function registerAgent(
     }
   }
 
+  if (agentId===null || !Number.isSafeInteger(agentId)) throw new Error("Registration confirmed but no agent ID was found. Check the transaction before retrying.");
   return { agentId, txHash: receipt.hash };
 }
 
@@ -127,11 +135,11 @@ export async function getAgentIdentity(
   agentId: number,
   useTestnet = false
 ): Promise<AgentIdentity | null> {
-  if (typeof window === "undefined" || !(window as any).ethereum) {
+  if (typeof window === "undefined" || !window.ethereum) {
     return null;
   }
 
-  const provider = new BrowserProvider((window as any).ethereum);
+  const {provider} = await walletSigner(useTestnet ? 97 : 56);
   const registryAddress = getRegistry(useTestnet);
   const contract = new Contract(registryAddress, IDENTITY_ABI, provider);
 
@@ -176,15 +184,14 @@ export async function getAgentIdentity(
 export async function getOwnedAgents(
   useTestnet = false
 ): Promise<number[]> {
-  if (typeof window === "undefined" || !(window as any).ethereum) {
+  if (typeof window === "undefined" || !window.ethereum) {
     return [];
   }
 
-  const provider = new BrowserProvider((window as any).ethereum);
-  const signer = await provider.getSigner();
+  const {signer} = await walletSigner(useTestnet ? 97 : 56);
   const address = await signer.getAddress();
   const registryAddress = getRegistry(useTestnet);
-  const contract = new Contract(registryAddress, IDENTITY_ABI, provider);
+  const contract = new Contract(registryAddress, IDENTITY_ABI, signer);
 
   try {
     const balance = Number(await contract.balanceOf(address));
@@ -199,4 +206,11 @@ export async function getOwnedAgents(
   } catch {
     return [];
   }
+}
+
+export function utf8Base64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }

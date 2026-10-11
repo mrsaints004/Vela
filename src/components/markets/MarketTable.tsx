@@ -6,7 +6,7 @@ import { StatusDot } from "@/components/shared/StatusDot";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight } from "lucide-react";
 
-interface MarketTicker {
+export interface MarketTicker {
   ticker: string;
   name: string;
   providerCount: number;
@@ -93,7 +93,7 @@ export function MarketTable({ tickers }: MarketTableProps) {
       key: "trade",
       label: "",
       align: "right",
-      render: (row) => (
+      render: () => (
         <span className="text-text-muted group-hover:text-accent transition-colors">
           <ArrowUpRight className="w-4 h-4" />
         </span>

@@ -84,15 +84,15 @@ export function buildRepresentationsConsidered(
 
     let selectionNote: string;
     if (isSelected && isBest) {
-      selectionNote = "Selected — lowest effective execution cost";
+      selectionNote = "Selected — lowest reference-risk score";
     } else if (isSelected) {
       selectionNote = "Selected by user override";
     } else if (!d.available) {
       selectionNote = "Unavailable — zero price or no data";
     } else if (d.liquidityRating === "none") {
-      selectionNote = "Excluded — no liquidity";
+      selectionNote = "No recent volume; execution availability requires a live quote";
     } else if (cost && cost.rank > 1) {
-      selectionNote = `Ranked #${cost.rank} — higher effective cost ($${cost.totalEffectiveCost.toFixed(2)})`;
+      selectionNote = `Ranked #${cost.rank} — higher reference-risk score ($${cost.totalEffectiveCost.toFixed(2)})`;
     } else {
       selectionNote = "Not selected";
     }
@@ -126,11 +126,11 @@ export function buildSelectionReasoning(
   const parts: string[] = [];
 
   parts.push(
-    `${selectedProvider} ranked #${selectedCost.rank} of ${costs.length} providers with $${selectedCost.totalEffectiveCost.toFixed(2)} effective execution cost.`
+    `${selectedProvider} ranked #${selectedCost.rank} of ${costs.length} providers with $${selectedCost.totalEffectiveCost.toFixed(2)} reference-risk score.`
   );
 
   if (selectedCost.rank === 1) {
-    parts.push("Lowest effective cost across all available representations.");
+    parts.push("Lowest reference-risk score across all available representations.");
   }
 
   if (referencePrice && referencePrice > 0) {
@@ -139,11 +139,11 @@ export function buildSelectionReasoning(
     );
   }
 
-  parts.push(`Liquidity: ${selectedCost.liquidityRating}. Est. slippage: ${selectedCost.estimatedSlippage.toFixed(2)}%.`);
+  parts.push(`Volume activity proxy: ${selectedCost.liquidityRating}. Impact heuristic: ${selectedCost.estimatedSlippage.toFixed(2)}%.`);
 
   if (!marketStatus.isOpen && marketStatus.staleDuration) {
     parts.push(
-      `Note: Reference price is ${marketStatus.staleDuration.toFixed(1)}h stale (market ${marketStatus.status}). Effective cost includes staleness penalty.`
+      `Note: Reference price is ${marketStatus.staleDuration.toFixed(1)}h stale (market ${marketStatus.status}). Reference-risk score includes a staleness penalty.`
     );
   }
 

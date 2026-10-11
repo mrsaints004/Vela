@@ -16,13 +16,13 @@ const NAV_LINKS = [
 
 export function TopNav() {
   const pathname = usePathname();
-  const { address, connected, connecting, connect, disconnect } = useWalletStore();
+  const { address, chainId, error, connected, connecting, connect, disconnect } = useWalletStore();
 
   return (
     <header className="sticky top-0 z-40 bg-surface-1 border-b border-border">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 min-h-14 sm:min-h-16 py-2 flex flex-wrap items-center justify-between gap-2">
         {/* Left: Logo + Nav */}
-        <div className="flex items-center gap-4 sm:gap-8">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-8 min-w-0">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center group-hover:bg-accent/15 transition-colors">
@@ -39,14 +39,14 @@ export function TopNav() {
           </Link>
 
           {/* Nav links */}
-          <nav className="flex items-center gap-1">
+          <nav className="flex items-center gap-1 overflow-x-auto max-w-full">
             {NAV_LINKS.map((link) => {
               const active = pathname === link.href;
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
+                  className={`px-2 sm:px-3 min-h-10 inline-flex items-center rounded-md text-xs sm:text-sm transition-colors ${
                     active
                       ? "text-text-primary bg-surface-2 font-medium"
                       : "text-text-muted hover:text-text-secondary hover:bg-surface-2/50"
@@ -78,11 +78,13 @@ export function TopNav() {
             {connecting
               ? "Connecting..."
               : connected && address
-              ? `${address.slice(0, 6)}...${address.slice(-4)}`
-              : "Connect Wallet"}
+              ? `Browser: ${address.slice(0, 6)}...${address.slice(-4)}`
+              : "Connect Browser Wallet"}
           </button>
         </div>
       </div>
+      {error && <p role="alert" className="px-4 pb-2 text-xs text-loss">{error}</p>}
+      {connected && chainId !== 56 && <p className="px-4 pb-2 text-xs text-warning">Browser wallet is on chain {chainId}. Browser-wallet trades require BSC mainnet (56). Agentic Wallet uses its separate BSC account.</p>}
     </header>
   );
 }

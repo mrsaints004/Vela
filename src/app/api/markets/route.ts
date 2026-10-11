@@ -13,7 +13,7 @@ export async function GET() {
 
     // Group by ticker (BSC only)
     const bscTokens = allTokens.filter((t) => t.chainId === "56");
-    const byTicker: Record<string, any[]> = {};
+    const byTicker: Record<string, {provider:string;symbol:string;contractAddress:string;type:number;multiplier:string}[]> = {};
 
     for (const token of bscTokens) {
       if (!byTicker[token.ticker]) byTicker[token.ticker] = [];
@@ -27,7 +27,7 @@ export async function GET() {
     }
 
     // Build enrichment from authenticated data
-    const enrichment: Record<string, any> = {};
+    const enrichment: Record<string, {name:string;logoUrl:string;referencePrice:number|null;marketCap:string|null;isOpen:boolean;providers?:Record<string,{tokenPrice:number;volume24H:string}>}> = {};
     if (authTokens) {
       for (const t of authTokens) {
         const ticker = t.underlyingTicker;

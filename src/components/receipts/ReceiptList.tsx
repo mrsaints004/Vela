@@ -4,7 +4,7 @@ import type { VelaReceipt, DecisionReceipt } from "@/lib/types";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { NumberDisplay } from "@/components/shared/NumberDisplay";
 import { StatusDot } from "@/components/shared/StatusDot";
-import { Zap } from "lucide-react";
+
 
 type AnyReceipt = DecisionReceipt | VelaReceipt;
 
@@ -75,11 +75,7 @@ export function ReceiptList({ receipts, onSelect }: ReceiptListProps) {
       align: "center",
       render: (row) => {
         if (isDecisionReceipt(row)) {
-          return row.executionMode === "autonomous" ? (
-            <Zap className="w-3 h-3 text-accent mx-auto" />
-          ) : (
-            <span className="text-[10px] text-text-muted">manual</span>
-          );
+          return <span className="text-[10px] text-text-muted">{row.digest ? row.executionMode : 'legacy'}</span>;
         }
         return <span className="text-text-muted text-xs">—</span>;
       },
@@ -111,10 +107,8 @@ export function ReceiptList({ receipts, onSelect }: ReceiptListProps) {
       label: "Status",
       align: "center",
       render: (row) => {
-        if (!row.execution) return <span className="text-text-muted text-xs">—</span>;
-        return (
-          <StatusDot status={row.execution.status === "confirmed" ? "active" : "fail"} />
-        );
+        const status=isDecisionReceipt(row)&&row.digest?row.outcome:'unverified';
+        return <span className={status==='confirmed'?'text-gain text-xs':status==='failed'||status==='refused'?'text-loss text-xs':'text-text-muted text-xs'}>{status||'unverified'}</span>;
       },
     },
   ];
@@ -125,7 +119,7 @@ export function ReceiptList({ receipts, onSelect }: ReceiptListProps) {
         columns={columns}
         data={receipts}
         onRowClick={onSelect}
-        emptyMessage="No decision receipts yet. Execute a trade to generate one."
+        emptyMessage="No decision receipts yet. Get an execution preview to generate one."
       />
     </div>
   );

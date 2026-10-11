@@ -16,7 +16,7 @@ export async function fetchAllTokens(): Promise<RWAToken[]> {
   }
 
   const startTime = Date.now();
-  const res = await fetch(RWA_LIST_URL);
+  const res = await fetch(RWA_LIST_URL,{cache:'no-store',signal:AbortSignal.timeout(15000)});
   const body = await res.json();
   const latency = Date.now() - startTime;
 
@@ -36,6 +36,7 @@ export async function fetchAllTokens(): Promise<RWAToken[]> {
     throw new Error(`RWA list fetch failed: ${JSON.stringify(body)}`);
   }
 
+  if(!res.ok||!Array.isArray(body.data)) throw new Error("Invalid RWA token list response.");
   const tokens: RWAToken[] = body.data;
   tokenCache = { tokens, timestamp: Date.now() };
   return tokens;
@@ -116,7 +117,7 @@ export async function fetchKlines(
     limit: String(limit),
   });
 
-  const res = await fetch(`${KLINE_URL}?${params}`);
+  const res = await fetch(`${KLINE_URL}?${params}`,{cache:'no-store',signal:AbortSignal.timeout(15000)});
   const body = await res.json();
 
   if (!body.success && body.code !== "000000") {

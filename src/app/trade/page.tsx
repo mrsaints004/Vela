@@ -1,10 +1,11 @@
 "use client";
 
+import {AgenticWalletPanel} from '@/components/agent/AgenticWalletPanel';
+import {useAgenticWalletStore} from '@/lib/stores/agentic-wallet';
 import { Suspense, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { useTradeStore } from "@/lib/stores/trade";
 import { IntentInput } from "@/components/trade/IntentInput";
-import { DiscoveryPanel } from "@/components/trade/DiscoveryPanel";
 import { ComparisonTable } from "@/components/trade/ComparisonTable";
 import { RecommendationBar } from "@/components/trade/RecommendationBar";
 import { RiskFlags } from "@/components/trade/RiskFlags";
@@ -17,26 +18,35 @@ import { useWalletStore } from "@/lib/stores/wallet";
 function TradePageInner() {
   const searchParams = useSearchParams();
   const ticker = searchParams.get("ticker");
+  const selling = searchParams.get("action") === "sell";
+  const saleToken = searchParams.get("token");
+  const initialIntent = ticker ? (selling ? `Sell all ${ticker}` : `Buy $5 of ${ticker}`) : null;
 
   const {
     step, intent, intentMethod, representations, costs, recommendation, factors,
-    selectedProvider, selectedTokenAddress, quote, simulation,
+    selectedProvider, quote, simulation,
     policyEvaluation, policy,
     referencePrice, marketStatus, receipt, error, execution,
-    executionMode, agenticPlan, selectionReasoning,
+    executionMode, selectionReasoning, agenticSigningPreview,setExecutionMode,
     submitIntent, selectProvider, fetchQuoteAndSimulate, approve, execute,
-    setExecutionMode, setPolicyPreset, updatePolicyField, reset,
+    setPolicyPreset, updatePolicyField, reset,
   } = useTradeStore();
 
+  const agenticStatus=useAgenticWalletStore(s=>s.status);
   const { connected, connect, connecting } = useWalletStore();
 
   // Auto-submit if ticker from URL
   useEffect(() => {
-    if (ticker && step === "idle") {
-      submitIntent(`Buy $500 of ${ticker}`);
+    if (ticker && (step === "idle" || useTradeStore.getState().intent?.raw!==initialIntent || (selling && useTradeStore.getState().selectedTokenAddress!==saleToken))) {
+      if(searchParams.get('wallet')==='agentic')setExecutionMode('agentic');
+      else if(searchParams.get('wallet')==='wallet')setExecutionMode('wallet');
+      void submitIntent(initialIntent!).then(()=>{
+        const state=useTradeStore.getState();
+        if(selling&&saleToken&&state.intent?.raw===initialIntent){const rep=state.representations.find(r=>r.tokenAddress.toLowerCase()===saleToken.toLowerCase());if(rep)state.selectProvider(rep.provider,rep.tokenAddress);}
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ticker]);
+  }, [ticker, selling, saleToken]);
 
   const isIdle = step === "idle";
   const isParsing = step === "parsing";
@@ -47,7 +57,11 @@ function TradePageInner() {
     "awaiting-approval", "executing", "verifying", "receipt",
   ].includes(step);
 
-  const inputDisabled = step === "executing" || step === "discovering" || step === "parsing";
+  const busy = ["executing", "verifying", "quoting", "discovering", "parsing"].includes(step);
+  const inputDisabled = busy;
+  const quoteBlockedReason = busy ? 'A request is already in progress.' : executionMode === 'agentic'
+    ? (!agenticStatus?.connected ? 'Sign in with Binance above, then refresh wallet status. Your browser wallet does not connect your Binance MPC account.' : null)
+    : (!connected ? 'Connect your browser wallet to request a wallet-specific quote.' : null);
 
   function handleNewIntent(raw: string) {
     if (step !== "idle" && step !== "error" && step !== "receipt" && step !== "comparing") {
@@ -65,12 +79,13 @@ function TradePageInner() {
             Trade
           </h1>
           <p className="text-xs text-text-muted mt-0.5">
-            Policy-bounded execution for tokenized equities
+            Compare stock representations, preview the actual trade, and approve in your wallet.
           </p>
         </div>
         {step !== "idle" && (
           <button
             onClick={reset}
+            disabled={busy}
             className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
           >
             <RotateCcw className="w-3 h-3" />
@@ -79,12 +94,19 @@ function TradePageInner() {
         )}
       </div>
 
+      <fieldset disabled={busy} className="flex flex-wrap gap-3 mb-4 text-sm"><legend className="text-xs text-text-secondary mb-2">Execution wallet</legend>
+        <label className="min-h-11 flex items-center gap-2"><input type="radio" name="execution-wallet" checked={executionMode==='wallet'} onChange={()=>setExecutionMode('wallet')}/>Browser wallet</label>
+        <label className="min-h-11 flex items-center gap-2"><input type="radio" name="execution-wallet" checked={executionMode==='agentic'} onChange={()=>setExecutionMode('agentic')}/>Binance Agentic Wallet</label>
+      </fieldset>
+      {executionMode==='agentic'&&<div className="mb-6"><AgenticWalletPanel/></div>}
       {/* Intent Input with Policy Config */}
       <div className="mb-6">
         <IntentInput
+          key={initialIntent || "manual"}
           onSubmit={handleNewIntent}
           disabled={inputDisabled}
           initialTicker={ticker}
+          initialIntent={initialIntent}
           policy={policy}
           onPolicyPreset={setPolicyPreset}
           onPolicyFieldChange={updatePolicyField}
@@ -92,12 +114,12 @@ function TradePageInner() {
       </div>
 
       {/* Error state */}
-      {step === "error" && error && (
+      {error && (
         <div className="border border-border rounded-xl px-4 py-3 flex items-start gap-3 mb-6">
           <AlertCircle className="w-4 h-4 text-loss mt-0.5 shrink-0" />
           <div>
             <p className="text-sm text-text-primary">{error}</p>
-            <p className="text-xs text-text-muted mt-1">Edit your intent above and try again.</p>
+            <p className="text-xs text-text-muted mt-1">{hasResults ? 'Follow the message above, then refresh the quote. Never retry an order with an unknown settlement outcome.' : 'Edit your intent above and try again.'}</p>
           </div>
         </div>
       )}
@@ -129,8 +151,8 @@ function TradePageInner() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
           {[
             { icon: Search, title: "Discover", desc: "Finds every tokenized version across bStocks, Ondo, xStocks." },
-            { icon: Layers, title: "Evaluate", desc: "Checks your policy constraints — deviation, slippage, concentration, liquidity." },
-            { icon: ShieldCheck, title: "Execute", desc: "Autonomously when policy permits. Manual approval when it doesn't." },
+            { icon: Layers, title: "Evaluate", desc: "Checks trade size, reference deviation, quote impact, market hours and preflight." },
+            { icon: ShieldCheck, title: "Execute", desc: "Fresh quote, policy checks, and your wallet signature before settlement." },
           ].map(({ icon: Icon, title, desc }) => (
             <div key={title} className="bg-surface-1 border border-border rounded-xl p-4">
               <Icon className="w-4 h-4 text-text-muted mb-2" />
@@ -156,7 +178,7 @@ function TradePageInner() {
                     : ""}
                 </p>
                 <p className="text-xs text-text-muted mt-0.5">
-                  On-chain prices may diverge from the last reference. Effective cost includes an uncertainty penalty.
+                  On-chain prices may diverge from the last reference. Discovery scores use the last reference. They are not executable prices or a claim about current fair value.
                   {policy?.blockAfterHours && (
                     <span className="text-loss"> Your policy blocks after-hours execution.</span>
                   )}
@@ -172,7 +194,7 @@ function TradePageInner() {
               <div className="flex items-center gap-2 text-sm text-text-muted">
                 <span className="font-mono text-text-primary">{intent.ticker}</span>
                 <span>·</span>
-                <span className="font-mono">${intent.amount.toLocaleString()}</span>
+                <span className="font-mono">{intent.action==='sell'?(intent.sellAll?'Sell all tokens':`Sell ${intent.amount.toLocaleString()} tokens`):`Buy $${intent.amount.toLocaleString()}`}</span>
                 <span>·</span>
                 <span>{representations.length} providers</span>
                 {intentMethod && (
@@ -200,6 +222,7 @@ function TradePageInner() {
               </div>
             )}
 
+            {intent?.action==='sell'&&<p className="text-sm text-text-secondary">Select the issuer whose stock tokens you own. Selling returns USDT to the same account. Token quantities are not share quantities. A fresh preview checks your exact balance, USD trade limit and vendor minimum.</p>}
             <PriceChart representations={representations} referencePrice={referencePrice} />
 
             <ComparisonTable
@@ -207,7 +230,7 @@ function TradePageInner() {
               selectedProvider={selectedProvider}
               onSelect={(provider) => {
                 const rep = representations.find((r) => r.provider === provider);
-                if (rep) selectProvider(provider, rep.tokenAddress);
+                if (rep && !busy) selectProvider(provider, rep.tokenAddress);
               }}
             />
 
@@ -232,44 +255,11 @@ function TradePageInner() {
 
             <RiskFlags policyEvaluation={policyEvaluation} />
 
-            {/* Execution mode toggle */}
-            {step === "comparing" && selectedProvider && (
-              <div className="bg-surface-1 border border-border rounded-xl p-3">
-                <div className="text-xs text-text-muted mb-2">Execution via</div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setExecutionMode("agentic")}
-                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center gap-1 ${
-                      executionMode === "agentic"
-                        ? "bg-accent/10 text-accent border border-accent/20"
-                        : "text-text-muted border border-transparent hover:text-text-secondary"
-                    }`}
-                  >
-                    <Zap className="w-3 h-3" />
-                    Agentic
-                  </button>
-                  <button
-                    onClick={() => setExecutionMode("wallet")}
-                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors ${
-                      executionMode === "wallet"
-                        ? "bg-surface-3 text-text-primary border border-border-active"
-                        : "text-text-muted border border-transparent hover:text-text-secondary"
-                    }`}
-                  >
-                    MetaMask
-                  </button>
-                </div>
-                {executionMode === "agentic" && (
-                  <p className="text-[10px] text-text-muted mt-1.5 leading-relaxed">
-                    {policy?.autonomousExecution
-                      ? "Auto-executes when all policy checks pass. Asks approval otherwise."
-                      : "Builds execution plan via agentic pipeline. Requires your approval."}
-                  </p>
-                )}
-              </div>
-            )}
+            <div className="bg-surface-1 border border-border rounded-xl p-3 text-xs text-text-secondary">
+              {executionMode==='agentic'?'Execution uses your Binance MPC wallet on BSC mainnet. Review Binance signing risks and confirm; Binance App rules and Developer Mode apply.':'Execution uses your browser wallet on BSC mainnet. Vela does not hold your keys. Every approval and stock order needs your signature.'}
+            </div>
 
-            {step === "comparing" && selectedProvider && !connected && (
+            {step === "comparing" && selectedProvider && executionMode==='wallet' && !connected && (
               <div className="bg-surface-1 border border-border rounded-xl p-4">
                 <div className="flex items-center gap-2 mb-2">
                   <Wallet className="w-4 h-4 text-text-muted" />
@@ -289,15 +279,21 @@ function TradePageInner() {
             )}
 
             {step === "comparing" && selectedProvider && (
+              <div className="space-y-2">
               <button
                 onClick={fetchQuoteAndSimulate}
-                className="w-full py-3 rounded-xl text-sm font-medium transition-colors bg-accent text-bg-primary hover:bg-accent/90"
+                disabled={!!quoteBlockedReason}
+                aria-describedby="quote-prerequisites"
+                className="w-full py-3 rounded-xl text-sm font-medium transition-colors bg-accent text-bg-primary hover:bg-accent/90 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Get Quote & Evaluate
               </button>
+              <p id="quote-prerequisites" role="status" className="text-xs text-text-secondary">{quoteBlockedReason || 'Vela accepts purchases from $5. Funds and permissions are checked during preview. Binance/vendor minimums may be higher and cannot be overridden by Vela. BNB may be required for approval gas.'}</p>
+              </div>
             )}
 
             <ExecutionFlow
+              agenticSigningPreview={agenticSigningPreview}
               step={step}
               quote={quote}
               simulation={simulation}
@@ -306,28 +302,12 @@ function TradePageInner() {
               onExecute={execute}
               txHash={execution?.txHash || null}
               executionMode={executionMode}
+              execution={execution}
+              receipt={receipt}
+              onRefresh={fetchQuoteAndSimulate}
             />
 
-            {step === "receipt" && receipt && (
-              <div className="bg-surface-1 border border-border rounded-xl px-4 py-3 text-center">
-                <div className="flex items-center justify-center gap-1.5 mb-1">
-                  {receipt.executionMode === "autonomous" && (
-                    <Zap className="w-3 h-3 text-accent" />
-                  )}
-                  <span className="text-xs font-mono text-text-muted">{receipt.id}</span>
-                </div>
-                <div className="text-[10px] text-text-muted mb-1">
-                  {receipt.executionMode === "autonomous"
-                    ? "Executed autonomously"
-                    : receipt.executionMode === "manual"
-                    ? "Executed with manual approval"
-                    : "Execution blocked"}
-                </div>
-                <a href="/receipts" className="block mt-1 text-xs text-accent hover:underline">
-                  View decision receipts &rarr;
-                </a>
-              </div>
-            )}
+
           </div>
         </div>
         </>

@@ -38,6 +38,7 @@ export function NumberDisplay({
   showSign = false,
   className = "",
 }: NumberDisplayProps) {
+  if (!Number.isFinite(value)) return <span className={`font-mono ${className}`}>Unavailable</span>;
   const formatted = formatNumber(value, format, decimals);
   const sign = value > 0 ? "+" : value < 0 ? "-" : "";
   const display = showSign ? `${sign}${formatted}` : value < 0 ? `-${formatted}` : formatted;

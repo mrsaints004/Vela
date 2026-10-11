@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MarketSearch } from "@/components/markets/MarketSearch";
-import { MarketTable } from "@/components/markets/MarketTable";
+import { MarketTable, type MarketTicker } from "@/components/markets/MarketTable";
 import { SkeletonTable } from "@/components/shared/SkeletonLoader";
 import { StatusDot } from "@/components/shared/StatusDot";
 import { Layers } from "lucide-react";
@@ -11,12 +11,12 @@ import { Layers } from "lucide-react";
 export default function MarketsPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["markets"],
     queryFn: async () => {
       const res = await fetch("/api/markets");
       if (!res.ok) throw new Error("Failed to fetch markets");
-      return res.json();
+      return res.json() as Promise<{tickers:MarketTicker[];total:number;marketStatus:{isOpen:boolean}}>
     },
   });
 
@@ -24,7 +24,7 @@ export default function MarketsPage() {
     setSearchQuery(query);
   }, []);
 
-  const filteredTickers = data?.tickers?.filter((t: any) => {
+  const filteredTickers = data?.tickers?.filter((t) => {
     if (!searchQuery) return true;
     const q = searchQuery.toUpperCase();
     return (
@@ -34,7 +34,7 @@ export default function MarketsPage() {
   }) ?? [];
 
   // Count stats
-  const multiProvider = data?.tickers?.filter((t: any) => t.providerCount >= 2)?.length ?? 0;
+  const multiProvider = data?.tickers?.filter((t) => t.providerCount >= 2)?.length ?? 0;
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
@@ -85,6 +85,7 @@ export default function MarketsPage() {
         </div>
       )}
 
+<div role="alert">{error && <><p className="text-loss">Markets could not load: {error.message}</p><button onClick={()=>refetch()} className="min-h-11 text-accent">Retry</button></>}</div>
       {/* Table */}
       {isLoading ? (
         <div className="bg-surface-1 border border-border rounded-xl">

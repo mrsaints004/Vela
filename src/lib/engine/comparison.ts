@@ -75,7 +75,7 @@ export async function fetchRepresentations(
 }
 
 /**
- * Calculate effective cost for each representation
+ * Calculate reference-risk score for each representation
  */
 export function calculateEffectiveCosts(
   representations: TokenRepresentation[],
@@ -91,7 +91,7 @@ export function calculateEffectiveCosts(
   // After-hours: apply staleness penalty to price deviation confidence
   const isStale = marketStatus?.referenceStale ?? false;
   const staleHours = marketStatus?.staleDuration ?? 0;
-  // Staleness amplifies uncertainty in price deviation — we widen the effective cost
+  // Staleness amplifies uncertainty in price deviation — we widen the reference-risk score
   // by a factor proportional to how long the reference has been stale
   const stalenessPenaltyFactor = isStale ? 1 + Math.min(staleHours * 0.05, 0.5) : 1;
 
@@ -116,7 +116,7 @@ export function calculateEffectiveCosts(
     // Liquidity rating
     const liquidityRating = getLiquidityRating(rep.volume24h);
 
-    // Total effective cost = |price deviation| + slippage penalty
+    // Total reference-risk score = |price deviation| + slippage penalty
     // When market is closed, staleness penalty widens the cost to reflect uncertainty
     const slippagePenalty =
       estimatedSlippage * rep.impliedSharePrice * 0.01;
@@ -133,10 +133,11 @@ export function calculateEffectiveCosts(
       liquidityRating,
       totalEffectiveCost,
       rank: 0,
+      basis: "reference-risk" as const,
     };
   });
 
-  // Rank by total effective cost (lower is better)
+  // Rank by total reference-risk score (lower is better)
   costs.sort((a, b) => a.totalEffectiveCost - b.totalEffectiveCost);
   costs.forEach((c, i) => (c.rank = i + 1));
 
@@ -210,9 +211,9 @@ export function compareRepresentations(
   let recommendation: string;
   if (bestByEffectiveCost && bestByPrice) {
     if (bestByEffectiveCost.provider === bestByPrice.provider) {
-      recommendation = `${bestByEffectiveCost.provider} is the best choice — lowest price and best effective execution cost.`;
+      recommendation = `${bestByEffectiveCost.provider} is the best choice — lowest discovery price and lowest reference-risk score; request a live quote to check execution.`;
     } else {
-      recommendation = `${bestByEffectiveCost.provider} has the lowest effective execution cost ($${bestCost.totalEffectiveCost.toFixed(2)}), though ${bestByPrice.provider} has a lower quoted price. The effective cost accounts for liquidity and slippage.`;
+      recommendation = `${bestByEffectiveCost.provider} has the lowest reference-risk score ($${bestCost.totalEffectiveCost.toFixed(2)}), though ${bestByPrice.provider} has a lower quoted price. The reference-risk score accounts for liquidity and slippage.`;
     }
   } else {
     recommendation = "Insufficient data to make a recommendation.";
@@ -297,7 +298,7 @@ export function getMarketStatus(): MarketStatus {
     return {
       isOpen: false,
       status: "weekend",
-      nextOpenTime: nextOpen.toISOString(),
+      nextOpenTime: nyWallTimeToUTC(nextOpen),
       referenceStale: true,
       staleDuration: calculateStaleDuration(nyTime),
     };
@@ -309,8 +310,8 @@ export function getMarketStatus(): MarketStatus {
       isOpen: false,
       status: "pre_market",
       nextOpenTime: null,
-      referenceStale: false,
-      staleDuration: null,
+      referenceStale: true,
+      staleDuration: calculateStaleDuration(nyTime),
     };
   }
 
@@ -350,32 +351,18 @@ export function getMarketStatus(): MarketStatus {
   return {
     isOpen: false,
     status: "closed",
-    nextOpenTime: nextOpen.toISOString(),
+    nextOpenTime: nyWallTimeToUTC(nextOpen),
     referenceStale: true,
     staleDuration: calculateStaleDuration(nyTime),
   };
 }
 
 function calculateStaleDuration(nyTime: Date): number {
-  const day = nyTime.getDay();
-  const hours = nyTime.getHours();
-  const minutes = nyTime.getMinutes();
-
-  // Market closes at 16:00 ET on weekdays
-  let hoursSinceClose = 0;
-
-  if (day === 0) {
-    // Sunday: closed since Friday 4pm
-    hoursSinceClose = 48 + hours + minutes / 60 - 16;
-  } else if (day === 6) {
-    // Saturday: closed since Friday 4pm
-    hoursSinceClose = 24 + hours + minutes / 60 - 16;
-  } else if (hours >= 16 || hours < 4) {
-    // Weekday after hours
-    hoursSinceClose = hours >= 16 ? hours - 16 + minutes / 60 : hours + 8 + minutes / 60;
-  }
-
-  return Math.max(0, hoursSinceClose);
+  const lastClose=new Date(nyTime);
+  lastClose.setHours(16,0,0,0);
+  if(lastClose>nyTime)lastClose.setDate(lastClose.getDate()-1);
+  while(lastClose.getDay()===0||lastClose.getDay()===6)lastClose.setDate(lastClose.getDate()-1);
+  return Math.max(0,(Date.parse(nyWallTimeToUTC(nyTime))-Date.parse(nyWallTimeToUTC(lastClose)))/3600000);
 }
 
 /**
@@ -429,16 +416,16 @@ export function generateRecommendation(
     });
   }
 
-  // Effective cost factor
+  // Reference-risk score factor
   factors.push({
-    label: "Effective Cost",
+    label: "Reference-risk score",
     value: `$${best.totalEffectiveCost.toFixed(2)}`,
     favorable: best.totalEffectiveCost < 1,
   });
 
   // Liquidity factor
   factors.push({
-    label: "Liquidity",
+    label: "Volume activity proxy",
     value: best.liquidityRating,
     favorable: best.liquidityRating === "high" || best.liquidityRating === "medium",
   });
@@ -454,7 +441,7 @@ export function generateRecommendation(
 
   // Slippage factor
   factors.push({
-    label: "Est. Slippage",
+    label: "Impact heuristic",
     value: `${best.estimatedSlippage.toFixed(1)}%`,
     favorable: best.estimatedSlippage < 1,
   });
@@ -462,8 +449,8 @@ export function generateRecommendation(
   // Volume factor
   if (bestRep) {
     factors.push({
-      label: "24h Volume",
-      value: `$${bestRep.volume24h.toLocaleString()}`,
+      label: "24h volume (source units)",
+      value: `${bestRep.volume24h.toLocaleString()}`,
       favorable: bestRep.volume24h > 10000,
     });
   }
@@ -476,14 +463,14 @@ export function generateRecommendation(
     const lowLiq = best.liquidityRating === "low" || best.liquidityRating === "none";
 
     if (highDev && lowLiq) {
-      recommendation = `Market closed (${staleHours.toFixed(0)}h). ${best.provider} has ${Math.abs(best.priceDeviationPercent).toFixed(1)}% deviation and ${best.liquidityRating} liquidity. Consider waiting for market open.`;
+      recommendation = `Market closed (${staleHours.toFixed(0)}h). ${best.provider} has ${Math.abs(best.priceDeviationPercent).toFixed(1)}% deviation and ${best.liquidityRating} volume activity. Consider waiting for market open.`;
     } else if (highDev) {
-      recommendation = `Market closed (${staleHours.toFixed(0)}h). ${best.provider} is ${Math.abs(best.priceDeviationPercent).toFixed(1)}% off reference — stale-price risk applies. Effective cost includes uncertainty penalty.`;
+      recommendation = `Market closed (${staleHours.toFixed(0)}h). ${best.provider} is ${Math.abs(best.priceDeviationPercent).toFixed(1)}% off reference — stale-price risk applies. Reference-risk score includes uncertainty penalty.`;
     } else {
-      recommendation = `Market closed (${staleHours.toFixed(0)}h). ${best.provider} is closest to last reference at $${best.totalEffectiveCost.toFixed(2)} effective cost. Reference may shift at open.`;
+      recommendation = `Market closed (${staleHours.toFixed(0)}h). ${best.provider} is closest to last reference at $${best.totalEffectiveCost.toFixed(2)} reference-risk score. Reference may shift at open.`;
     }
   } else {
-    recommendation = `${best.provider} — lowest effective cost at $${best.totalEffectiveCost.toFixed(2)} with ${best.liquidityRating} liquidity`;
+    recommendation = `${best.provider} — lowest reference-risk score at $${best.totalEffectiveCost.toFixed(2)} with ${best.liquidityRating} volume activity`;
   }
 
   return {
@@ -578,7 +565,7 @@ export function evaluateTradeFirewall(
       (selectedCost?.totalEffectiveCost ?? Infinity) * 0.9
   ) {
     reasons.push(
-      `${bestCost.provider} has a significantly lower effective execution cost ($${bestCost.totalEffectiveCost.toFixed(2)} vs $${selectedCost?.totalEffectiveCost.toFixed(2)}).`
+      `${bestCost.provider} has a significantly lower reference-risk score ($${bestCost.totalEffectiveCost.toFixed(2)} vs $${selectedCost?.totalEffectiveCost.toFixed(2)}).`
     );
   }
 
@@ -609,4 +596,17 @@ export function evaluateTradeFirewall(
       simulationPassed: null,
     },
   };
+}
+
+// Convert New York wall time into a real UTC instant, including DST.
+function nyWallTimeToUTC(wall: Date): string {
+  const target=Date.UTC(wall.getFullYear(),wall.getMonth(),wall.getDate(),wall.getHours(),wall.getMinutes());
+  let instant=target;
+  for(let i=0;i<3;i++){
+    const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(instant));
+    const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+    const shown=Date.UTC(Number(values.year),Number(values.month)-1,Number(values.day),Number(values.hour),Number(values.minute));
+    instant+=target-shown;
+  }
+  return new Date(instant).toISOString();
 }

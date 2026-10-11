@@ -24,7 +24,7 @@ export const useAgentStore = create<AgentState>()(
       registered: false,
       registering: false,
       error: null,
-      useTestnet: true,
+      useTestnet: false,
 
       setRegistered: (agentId, txHash) =>
         set({ agentId, txHash, registered: true, registering: false, error: null }),
@@ -36,13 +36,14 @@ export const useAgentStore = create<AgentState>()(
         set({ error, registering: false }),
 
       setUseTestnet: (useTestnet) =>
-        set({ useTestnet }),
+        set({ useTestnet, agentId: null, txHash: null, registered: false, error: null }),
 
       reset: () =>
         set({ agentId: null, txHash: null, registered: false, registering: false, error: null }),
     }),
     {
       name: "vela-agent",
+      partialize: (state)=>({agentId:state.agentId,txHash:state.txHash,registered:state.registered,useTestnet:state.useTestnet}),
     }
   )
 );

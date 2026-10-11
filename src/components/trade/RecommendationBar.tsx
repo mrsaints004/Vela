@@ -1,7 +1,7 @@
 "use client";
 
 import type { RecommendationFactor } from "@/lib/types";
-import { CheckCircle, AlertCircle } from "lucide-react";
+import { CheckCircle } from "lucide-react";
 
 interface RecommendationBarProps {
   recommendation: string;

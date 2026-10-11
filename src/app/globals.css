@@ -15,8 +15,8 @@
   --color-loss: #EF4444;
   --color-warning: #F59E0B;
   --color-neutral: #6B7280;
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains), "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: Arial, Helvetica, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, monospace;
 }
 
 body {
@@ -96,3 +96,6 @@ body {
 .animate-pulse-subtle {
   animation: pulse-subtle 2s ease-in-out infinite;
 }
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {outline:2px solid var(--color-accent);outline-offset:3px;}
+@media (prefers-reduced-motion: reduce) {* {animation-duration:0.01ms !important;transition-duration:0.01ms !important;}}

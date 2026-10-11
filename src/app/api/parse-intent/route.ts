@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseIntentWithAI } from "@/lib/engine/ai-intent";
-import { parseIntent } from "@/lib/engine/intent";
+import { guard } from '@/lib/server/request';
+import { parseIntent, validateIntent } from "@/lib/engine/intent";
 
 export async function POST(request: NextRequest) {
   try {
+    guard(request);
     const { raw } = await request.json();
 
-    if (!raw || typeof raw !== "string") {
+    if (!raw || typeof raw !== "string" || raw.length>2000) {
       return NextResponse.json({ error: "raw intent string required" }, { status: 400 });
     }
 
+    if(/\b(sell|dump|exit|liquidate|close|shares?)\b/i.test(raw)){const intent=parseIntent(raw);validateIntent(intent!);return NextResponse.json({intent,method:'regex',confidence:'high'});}
     // Try AI parsing first
     const aiResult = await parseIntentWithAI(raw);
 
     if (aiResult.intent && aiResult.method === "ai") {
+      validateIntent(aiResult.intent);
       return NextResponse.json({
         intent: aiResult.intent,
         method: "ai",
@@ -25,6 +29,7 @@ export async function POST(request: NextRequest) {
     const regexIntent = parseIntent(raw);
 
     if (regexIntent) {
+      validateIntent(regexIntent);
       return NextResponse.json({
         intent: regexIntent,
         method: "regex",

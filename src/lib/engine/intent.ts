@@ -37,6 +37,12 @@ const PATTERNS = [
 ];
 
 export function parseIntent(raw: string): TradeIntent | null {
+  const sellText = raw.trim();
+  const all = sellText.match(/^sell\s+all\s+(?:my\s+)?([A-Z0-9.-]{1,15})(?:\s+(?:tokens|position))?$/i);
+  const quantity = sellText.match(/^sell\s+(\d+(?:\.\d+)?)\s+tokens?\s+(?:of\s+)?([A-Z0-9.-]{1,15})$/i)
+    || sellText.match(/^sell\s+(\d+(?:\.\d+)?)\s+([A-Z0-9.-]{1,15})\s+tokens?$/i);
+  if(all) return {raw,action:'sell',ticker:all[1].toUpperCase(),amount:0,unit:'tokens',sellAll:true};
+  if(quantity) return {raw,action:'sell',ticker:quantity[2].toUpperCase(),amount:Number(quantity[1]),unit:'tokens',sellAll:false};
   const trimmed = raw.trim();
   if (!trimmed) return null;
 
@@ -157,7 +163,7 @@ export function parseIntent(raw: string): TradeIntent | null {
           raw: trimmed,
           action: "buy",
           ticker,
-          amount: 500,
+          amount: 0,
           unit: "usd",
         };
       }
@@ -174,7 +180,7 @@ export function parseIntent(raw: string): TradeIntent | null {
       raw: trimmed,
       action: actionMatch ? "sell" : "buy",
       ticker: tickerMatch[1],
-      amount: amountMatch ? parseAmount(amountMatch[1]) : 500,
+      amount: amountMatch ? parseAmount(amountMatch[1]) : 0,
       unit: "usd",
     };
   }
@@ -185,4 +191,22 @@ export function parseIntent(raw: string): TradeIntent | null {
 function parseAmount(s: string): number {
   const n = parseFloat(s.replace(/,/g, ""));
   return n > 0 ? n : 0;
+}
+
+export const MIN_PURCHASE_USD = 5;
+export function validatePurchaseAmount(amount: number): void {
+  if (!Number.isFinite(amount) || amount < MIN_PURCHASE_USD || amount > 25000) throw new Error('Enter a purchase amount of at least $5 and at most $25,000. Vendor minimums may be higher.');
+}
+export function validateIntent(intent: TradeIntent): void {
+  if (!intent || !['buy','sell'].includes(intent.action)) throw new Error('Enter a supported buy or sell request.');
+  if(intent.action==='sell') {
+    const parsed=parseIntent(intent.raw||'');
+    if(intent.unit!=='tokens'||!parsed||parsed.action!=='sell'||parsed.unit!=='tokens'||parsed.ticker!==intent.ticker||parsed.amount!==intent.amount||!!parsed.sellAll!==!!intent.sellAll||(!intent.sellAll&&(!Number.isFinite(intent.amount)||intent.amount<=0))) throw new Error('Use Sell all NVDA or Sell 0.01 tokens of NVDA. Dollar, share-count and percentage sells are unsupported.');
+    if(!/^[A-Z0-9.-]{1,15}$/.test(intent.ticker))throw new Error('Invalid stock ticker.');
+    return;
+  }
+  if(/\b(sell|dump|exit|liquidate|close|shares?)\b/i.test(intent.raw||'')) throw new Error('This request is not a supported dollar purchase.');
+  if (intent.unit !== 'usd') throw new Error('Share-count orders are not supported yet. Enter a dollar amount, for example Buy $5 of NVDA.');
+  validatePurchaseAmount(intent.amount);
+  if (!/^[A-Z0-9.-]{1,15}$/.test(intent.ticker)) throw new Error('Invalid stock ticker.');
 }

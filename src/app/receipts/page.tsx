@@ -25,12 +25,12 @@ export default function ReceiptsPage() {
             No decision receipts yet
           </h2>
           <p className="text-sm text-text-muted mb-6 max-w-md mx-auto leading-relaxed">
-            Every trade generates a decision receipt — the full trail from intent
+            Every execution preview generates a decision receipt — the full trail from intent
             to policy evaluation to execution. See what the agent considered,
-            why it chose a provider, which policy checks passed, and what happened.
+            why a provider was selected, which policy checks passed, and what happened.
           </p>
           <Link
-            href="/"
+            href="/trade"
             className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-medium bg-accent/10 border border-accent/20 text-accent hover:bg-accent/15 transition-colors"
           >
             Start Trading

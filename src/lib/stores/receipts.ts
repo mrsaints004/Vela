@@ -17,7 +17,7 @@ export const useReceiptsStore = create<ReceiptsState>()(
 
       addReceipt: (receipt) =>
         set((state) => ({
-          receipts: [receipt, ...state.receipts],
+          receipts: [receipt, ...state.receipts.filter(r => r.id !== receipt.id)].slice(0, 200),
         })),
 
       clearReceipts: () => set({ receipts: [] }),

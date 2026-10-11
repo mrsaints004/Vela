@@ -74,6 +74,7 @@ export interface EffectiveCost {
   liquidityRating: "high" | "medium" | "low" | "none";
   totalEffectiveCost: number;
   rank: number;
+  basis?: "reference-risk" | "executable-price";
 }
 
 export interface MarketStatus {
@@ -131,7 +132,8 @@ export interface TradeIntent {
   action: "buy" | "sell";
   ticker: string;
   amount: number;
-  unit: "usd" | "shares";
+  unit: "usd" | "shares" | "tokens";
+  sellAll?: boolean;
 }
 
 export interface DiscoveredRepresentation {
@@ -147,6 +149,12 @@ export interface DiscoveredRepresentation {
 }
 
 export interface QuoteSnapshot {
+  action?: 'buy' | 'sell';
+  inputToken?: string;
+  outputToken?: string;
+  inputDecimals?: number;
+  rawInput?: string;
+  inputAmount?: string;
   quoteId: string;
   provider: string;
   vendorName: string;
@@ -159,9 +167,15 @@ export interface QuoteSnapshot {
   routes: string[];
   isHoneyPot: boolean;
   timestamp: number;
+  expiresAt?: number;
+  outputDecimals?: number;
+  rawOutput?: string;
+  executionMode?: "SWAP" | "RFQ";
+  normalizedShares?: number;
 }
 
 export interface SimulationSnapshot {
+  scope?: "transaction" | "rfq-order";
   status: "SUCCESS" | "FAILED";
   failReason: string | null;
   balanceChanges: Array<{
@@ -175,6 +189,11 @@ export interface SimulationSnapshot {
 export interface ExecutionSnapshot {
   txHash: string | null;
   status: "pending" | "confirmed" | "failed";
+  actualOutput?: string;
+  actualInput?: string;
+  chainId?: 56;
+  orderId?: string;
+  error?: string;
   blockNumber: number | null;
   gasUsed: string | null;
   timestamp: number;
@@ -266,7 +285,7 @@ export const POLICY_PRESETS: Record<Exclude<PolicyPreset, "custom">, Omit<Execut
     maxTradeSize: 2000,
     dailyLimit: 5000,
     maxConcentration: 30,
-    autonomousExecution: true,
+    autonomousExecution: false,
     blockAfterHours: false,
     minLiquidity: "medium",
   },
@@ -276,7 +295,7 @@ export const POLICY_PRESETS: Record<Exclude<PolicyPreset, "custom">, Omit<Execut
     maxTradeSize: 10000,
     dailyLimit: 25000,
     maxConcentration: 50,
-    autonomousExecution: true,
+    autonomousExecution: false,
     blockAfterHours: false,
     minLiquidity: "low",
   },
@@ -318,6 +337,14 @@ export interface RepresentationConsidered {
 }
 
 export interface DecisionReceipt {
+  signer?: 'browser-wallet'|'binance-agentic-wallet';
+  agenticEvidence?: {wallet:string;cliVersion:string;quotaLeft:number;developerModeQuotaLeft:number;sessionExpireTime:string;operations:{id:string;operation:string;status:string;requestId:string;orderId?:string;expiresAt:number;requireConfirmation:boolean;parsed:unknown;risks:unknown;authorityChanges:unknown}[]};
+  walletAddress?: string;
+  digest?: string;
+  verificationUrl?: string;
+  outcome?: "refused" | "failed" | "pending" | "confirmed";
+  failureReason?: string;
+  previewId?: string;
   id: string;
   timestamp: number;
 
@@ -355,7 +382,7 @@ export interface DecisionReceipt {
 
   // EXECUTION
   execution: ExecutionSnapshot | null;
-  executionMode: "autonomous" | "manual" | "blocked";
+  executionMode: "autonomous" | "manual" | "agentic" | "blocked";
 
   // EXPECTED VS ACTUAL
   expectedSlippage: number | null;

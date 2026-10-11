@@ -1,280 +1,47 @@
 "use client";
-
-import type { TradeFlowStepV2, QuoteSnapshot, SimulationSnapshot, PolicyEvaluation } from "@/lib/types";
-import { NumberDisplay } from "@/components/shared/NumberDisplay";
-import { StatusDot } from "@/components/shared/StatusDot";
-import { Skeleton } from "@/components/shared/SkeletonLoader";
-import { Zap, Shield, Bot } from "lucide-react";
-import { useAgentStore } from "@/lib/stores/agent";
-
-interface ExecutionFlowProps {
-  step: TradeFlowStepV2;
-  quote: QuoteSnapshot | null;
-  simulation: SimulationSnapshot | null;
-  policyEvaluation: PolicyEvaluation | null;
-  onApprove: () => void;
-  onExecute: () => void;
-  txHash: string | null;
-  executionMode: "wallet" | "agentic";
-}
-
-const STEPS = [
-  { id: "quoting", label: "Quote" },
-  { id: "simulating", label: "Simulate" },
-  { id: "evaluating", label: "Policy" },
-  { id: "awaiting-approval", label: "Approve" },
-  { id: "executing", label: "Execute" },
-  { id: "verifying", label: "Verify" },
-  { id: "receipt", label: "Receipt" },
-] as const;
-
-function getStepStatus(
-  stepId: string,
-  currentStep: TradeFlowStepV2
-): "completed" | "active" | "pending" | "skipped" {
-  const stepOrder = STEPS.map((s) => s.id);
-  const currentIdx = stepOrder.indexOf(currentStep as any);
-  const stepIdx = stepOrder.indexOf(stepId as any);
-  if (stepIdx < 0 || currentIdx < 0) return "pending";
-  if (stepIdx < currentIdx) return "completed";
-  if (stepIdx === currentIdx) return "active";
-  return "pending";
-}
-
-export function ExecutionFlow({
-  step,
-  quote,
-  simulation,
-  policyEvaluation,
-  onApprove,
-  onExecute,
-  txHash,
-  executionMode,
-}: ExecutionFlowProps) {
-  const { agentId, registered } = useAgentStore();
-
-  const isInFlow = [
-    "quoting", "simulating", "evaluating", "awaiting-approval",
-    "executing", "verifying", "receipt",
-  ].includes(step);
-  if (!isInFlow) return null;
-
-  const isAutonomous = policyEvaluation?.canExecuteAutonomously === true;
-
-  return (
-    <div className="bg-surface-1 border border-border rounded-xl">
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-        <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-          Execution Flow
-        </h3>
-        <div className="flex items-center gap-2">
-          {registered && agentId && (
-            <span className="flex items-center gap-1 text-[10px] text-accent bg-accent/10 px-1.5 py-0.5 rounded">
-              <Bot className="w-2.5 h-2.5" />
-              Agent #{agentId}
-            </span>
-          )}
-          {isAutonomous && step !== "receipt" && (
-            <div className="flex items-center gap-1 text-accent">
-              <Zap className="w-3 h-3" />
-              <span className="text-[10px] font-medium">Auto</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Step indicators */}
-      <div className="px-4 py-3 flex items-center gap-0.5 border-b border-border/50 overflow-x-auto">
-        {STEPS.map((s, i) => {
-          const status = getStepStatus(s.id, step);
-          // Skip "Approve" step indicator if autonomous
-          if (s.id === "awaiting-approval" && isAutonomous) {
-            return (
-              <div key={s.id} className="flex items-center gap-0.5">
-                <div className="flex items-center gap-1">
-                  <StatusDot status="idle" />
-                  <span className="text-xs text-text-muted line-through">{s.label}</span>
-                </div>
-                {i < STEPS.length - 1 && <span className="text-text-muted mx-0.5">&rarr;</span>}
-              </div>
-            );
-          }
-          return (
-            <div key={s.id} className="flex items-center gap-0.5">
-              <div className="flex items-center gap-1">
-                <StatusDot
-                  status={
-                    status === "completed" ? "active" :
-                    status === "active" ? "warning" : "idle"
-                  }
-                  pulse={status === "active"}
-                />
-                <span className={`text-xs whitespace-nowrap ${
-                  status === "active" ? "text-text-primary font-medium" :
-                  status === "completed" ? "text-text-secondary" : "text-text-muted"
-                }`}>
-                  {s.label}
-                </span>
-              </div>
-              {i < STEPS.length - 1 && <span className="text-text-muted mx-0.5">&rarr;</span>}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Content */}
-      <div className="p-4 space-y-4">
-        {/* Quote loading */}
-        {step === "quoting" && !quote && (
-          <div className="space-y-2">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-4 w-32" />
-          </div>
-        )}
-
-        {/* Quote details */}
-        {quote && (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Expected Output</span>
-              <NumberDisplay value={quote.toAmount} format="decimal" decimals={6} />
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Expected Price</span>
-              <NumberDisplay value={quote.expectedPrice} format="currency" />
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Price Impact</span>
-              <NumberDisplay value={quote.priceImpact} format="percent" colored />
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Gas Fee</span>
-              <NumberDisplay value={quote.gasFee} format="currency" decimals={4} />
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-text-muted">Route</span>
-              <span className="text-xs font-mono text-text-secondary">
-                {quote.routes.join(" → ")}
-              </span>
-            </div>
-            {quote.isHoneyPot && (
-              <div className="text-xs text-loss font-medium mt-1">
-                Warning: Token flagged as potential honeypot
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Simulation result */}
-        {simulation && (
-          <div className="border-t border-border/50 pt-3">
-            <div className="flex items-center gap-2 text-sm">
-              <StatusDot status={simulation.status === "SUCCESS" ? "active" : "fail"} />
-              <span className={simulation.status === "SUCCESS" ? "text-gain" : "text-loss"}>
-                Simulation {simulation.status.toLowerCase()}
-              </span>
-              {simulation.failReason && (
-                <span className="text-xs text-text-muted">— {simulation.failReason}</span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Autonomous execution notice */}
-        {step === "executing" && isAutonomous && (
-          <div className="border-t border-border/50 pt-3">
-            <div className="flex items-center gap-2 py-2 px-3 rounded-lg bg-accent/5 border border-accent/10">
-              <Zap className="w-4 h-4 text-accent" />
-              <div>
-                <span className="text-sm text-accent font-medium">Executing autonomously</span>
-                <p className="text-[10px] text-text-muted mt-0.5">
-                  All policy checks passed.{" "}
-                  {registered && agentId
-                    ? `Agent #${agentId} executing per your policy constraints.`
-                    : "Executing per your policy constraints."}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Manual approve button */}
-        {step === "awaiting-approval" && (
-          <div className="border-t border-border/50 pt-3">
-            {policyEvaluation?.action === "block" ? (
-              <>
-                <button
-                  disabled
-                  className="w-full py-2.5 rounded-xl text-sm font-medium bg-loss/10 text-loss border border-loss/20 opacity-60 cursor-not-allowed"
-                >
-                  Blocked by Policy
-                </button>
-                <p className="text-xs text-loss mt-2">
-                  Trade blocked — review policy checks above.
-                </p>
-              </>
-            ) : (
-              <button
-                onClick={() => { onApprove(); onExecute(); }}
-                className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors bg-accent/10 text-accent border border-accent/20 hover:bg-accent/20"
-              >
-                <div className="flex items-center justify-center gap-1.5">
-                  <Shield className="w-3.5 h-3.5" />
-                  Approve & Execute
-                </div>
-              </button>
-            )}
-            {policyEvaluation?.action === "warn" && (
-              <p className="text-xs text-warning mt-2">
-                Caution: Some checks are near your limits. Review before proceeding.
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Executing */}
-        {step === "executing" && !isAutonomous && !txHash && (
-          <div className="border-t border-border/50 pt-3">
-            <div className="flex items-center gap-2">
-              <StatusDot status="warning" pulse />
-              <span className="text-sm text-text-secondary">Executing trade...</span>
-            </div>
-          </div>
-        )}
-
-        {/* Verifying */}
-        {step === "verifying" && (
-          <div className="border-t border-border/50 pt-3">
-            <div className="flex items-center gap-2">
-              <StatusDot status="warning" pulse />
-              <span className="text-sm text-text-secondary">Verifying execution...</span>
-            </div>
-          </div>
-        )}
-
-        {/* Receipt */}
-        {step === "receipt" && (
-          <div className="border-t border-border/50 pt-3 space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <StatusDot status="active" />
-              <span className="text-gain">Trade complete</span>
-            </div>
-            {txHash && (
-              <div className="text-xs text-text-muted">
-                <span>TX: </span>
-                <a
-                  href={`https://bscscan.com/tx/${txHash}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-mono text-accent hover:underline"
-                >
-                  {txHash.slice(0, 10)}...{txHash.slice(-8)}
-                </a>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+import Link from 'next/link';
+import {useEffect,useState} from 'react';
+import type {TradeFlowStepV2,QuoteSnapshot,SimulationSnapshot,PolicyEvaluation,ExecutionSnapshot,DecisionReceipt} from '@/lib/types';
+import {AgenticSigningReview} from '@/components/agent/AgenticSigningReview';
+import type {AgenticSigningPreview} from '@/lib/types/agentic';
+import {NumberDisplay} from '@/components/shared/NumberDisplay';
+import {allowanceOnlyBlocked} from '@/lib/engine/approval-readiness';
+interface Props {agenticSigningPreview?:AgenticSigningPreview|null;step:TradeFlowStepV2;quote:QuoteSnapshot|null;simulation:SimulationSnapshot|null;policyEvaluation:PolicyEvaluation|null;onApprove:()=>void;onExecute:()=>void;txHash:string|null;executionMode:'wallet'|'agentic';execution?:ExecutionSnapshot|null;receipt?:DecisionReceipt|null;onRefresh?:()=>void;}
+export function ExecutionFlow({step,quote,simulation,policyEvaluation,onApprove,onExecute,txHash,execution,receipt,onRefresh,executionMode,agenticSigningPreview}:Props){
+  const [now,setNow]=useState(()=>Date.now());
+  useEffect(()=>{const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[]);
+  if(!['quoting','simulating','evaluating','awaiting-approval','executing','verifying','receipt'].includes(step))return null;
+  const outcome=receipt?.outcome||execution?.status;
+  const confirmed=outcome==='confirmed' && !!txHash;
+  const blocked=policyEvaluation?.action==='block';
+  const expired=!!quote && now-quote.timestamp>=25000;
+  return <section className="bg-surface-1 border border-border rounded-xl" aria-live="polite">
+    <h3 className="px-4 py-3 border-b border-border text-xs uppercase tracking-wider text-text-secondary">Execution Flow · {executionMode==='agentic'?'Binance MPC signing':'Wallet approval'}</h3>
+    <p className="px-4 py-3 border-b border-border text-xs text-text-muted">Quote → {simulation?.scope==='rfq-order'?'Order preflight':'Simulate'} → Policy → Approve → Sign → Settle → Verify → Receipt</p>
+    <div className="p-4 space-y-3">
+      {step==='quoting' && <p>Getting your wallet-specific quote and preflight…</p>}
+      {quote && <dl className="space-y-2 text-sm">
+        {quote.action==='sell'&&<div className="flex justify-between"><dt>Stock tokens to sell</dt><dd className="font-mono break-all">{quote.inputAmount}</dd></div>}
+        <div className="flex justify-between"><dt>{quote.action==='sell'?'Expected USDT proceeds':'Expected stock tokens'}</dt><dd><NumberDisplay value={quote.toAmount} decimals={6}/></dd></div>
+        <div className="flex justify-between"><dt>{quote.action==='sell'?'Normalized shares sold':'Normalized share exposure'}</dt><dd><NumberDisplay value={quote.normalizedShares||0} decimals={6}/></dd></div>
+        <div className="flex justify-between"><dt>{quote.action==='sell'?'Quoted proceeds per share':'Quoted cost per share'}</dt><dd><NumberDisplay value={quote.expectedPrice} format="currency"/></dd></div>
+        <div className="flex justify-between"><dt>Price impact magnitude</dt><dd><NumberDisplay value={Math.abs(quote.priceImpact)} format="percent"/></dd></div>
+        <div className="flex justify-between"><dt>Estimated network fee</dt><dd><NumberDisplay value={quote.tradeFee} format="currency" decimals={4}/></dd></div>
+        <div className="flex justify-between"><dt>Signing mode</dt><dd>{quote.executionMode==='RFQ'?'RFQ typed order':'EVM transaction'}</dd></div>
+      </dl>}
+      {simulation && <p className={`text-xs ${simulation.status==='SUCCESS'?'text-gain':'text-loss'}`}>{simulation.scope==='rfq-order'?'RFQ order validation':'Transaction simulation'}: {simulation.status.toLowerCase()}{simulation.failReason?` — ${simulation.failReason}`:''}</p>}
+      {simulation?.scope==='rfq-order' && <p className="text-xs text-text-muted">Preflight checks order fields and wallet funds. The relayer’s settlement transaction cannot be simulated before it exists; confirmation requires verified BSC transfers.</p>}
+      {step==='awaiting-approval' && <>
+        {executionMode==='wallet'&&allowanceOnlyBlocked(policyEvaluation,simulation)&&<div className="space-y-2"><p className="text-xs text-text-secondary">The swap is blocked because the router cannot spend your input token yet. Approve only the exact amount, then request a fresh quote and simulation. This approval does not purchase the stock.</p><button onClick={onApprove} disabled={expired} className="w-full min-h-11 rounded-lg border border-accent text-accent disabled:opacity-40">{expired?'Refresh quote before approval':'Approve exact input-token amount'}</button></div>}
+        {executionMode==='agentic'&&agenticSigningPreview?<AgenticSigningReview key={agenticSigningPreview.id} preview={agenticSigningPreview} onConfirm={onExecute} expired={now>=agenticSigningPreview.expiresAt}/>:<button onClick={onExecute} disabled={blocked||!quote||expired} className="w-full min-h-11 rounded-lg bg-accent text-bg-primary disabled:opacity-40">{blocked?'Blocked by policy':expired?'Quote expired':executionMode==='agentic'?'Get Binance Signing Preview':'Review & Sign in Wallet'}</button>}
+        <p className="text-xs text-text-muted">{blocked?'No transaction was sent. Review the failed checks or refresh unavailable data.':executionMode==='agentic'?'Review Binance’s parsed operation and risks, then explicitly confirm signing. App confirmation may also be required. Approval confirmation requires a fresh trade preview.':'You may first need to approve the exact input-token amount. After approval, get a fresh quote before signing the stock order.'}</p>
+        <button onClick={onRefresh} className="w-full min-h-11 border border-border rounded-lg text-sm">Refresh quote & preflight</button>
+      </>}
+      {step==='executing' && <p className="text-sm">{executionMode==='agentic'?'Contacting Binance Agentic Wallet. Your configured App permissions apply.':'Review the request in your wallet. Vela cannot sign without your permission.'}</p>}
+      {step==='verifying' && <p className="text-sm">Waiting for settlement and checking actual BSC transfers…</p>}
+      {step==='receipt' && <p className={confirmed?'text-gain':outcome==='failed'||outcome==='refused'?'text-loss':'text-warning'}>{confirmed?'Trade confirmed on BSC':outcome==='failed'?'Trade failed':outcome==='refused'?'Trade refused — no order submitted':'Settlement pending — not confirmed'}</p>}
+      {txHash && <a className="block text-xs text-accent break-all" href={`https://bscscan.com/tx/${txHash}`} target="_blank" rel="noopener noreferrer">View BSC transaction: {txHash.slice(0,12)}…</a>}
+      {receipt && <Link className="block text-sm text-accent" href={`/receipts/${receipt.id}`}>View {receipt.outcome==='refused'?'refusal':'decision'} receipt →</Link>}
     </div>
-  );
+  </section>;
 }

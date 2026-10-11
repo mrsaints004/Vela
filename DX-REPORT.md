@@ -1,237 +1,160 @@
-Developer Experience Report — Vela
+# Vela — Developer Experience Report
 
-Project: Vela — Policy-Bounded Autonomous Execution for Tokenized Equities
-Team: Solo builder
-Build window: Sep 16 – Oct 11, 2026
-Stack used: RWA Data API, Trading API, Transaction API, Wallet API, Agentic Wallet, BNB Agent Studio (ERC-8004)
+Updated 11 October 2026.
 
----
+Vela is a tokenized-stock execution interface for BSC mainnet. It discovers stock representations, obtains a wallet-specific quote, evaluates execution constraints, requests signing, and records the decision and settlement evidence. The integration uses Binance RWA and market data, Trading, Transaction and Wallet APIs, plus the official Binance Agentic Wallet CLI. ERC-8004 identity registration is a separate optional feature. Managed BNB Agent Studio deployment and x402 payments are outside the implemented scope.
 
-Onboarding
+This report distinguishes problems observed in the application from behavior established by code and fixture tests. It does not claim a completed funded trade, a registered identity or measured platform performance without supporting records.
 
-Time from opening docs to first successful API call: ~45 minutes.
+## Onboarding
 
-Signed up at web3.binance.com/en/dev-portal, got API key and secret within minutes. The authentication docs at /dev-docs/authentication explained HMAC-SHA256 signing clearly — timestamp + method + path + body, base64-encoded. First authenticated call to /api/v1/dex/market/rwa/tokens succeeded on the second attempt.
+There are three separate setup steps: Web3 API credentials, a funded BSC execution account, and signing permission. Treating them as one connection caused confusion during development.
 
-Where I got stuck (first attempt): The signing function requires the full path including /build as the prefix. The docs show the path as /api/v1/... but the actual signed string must use /build/api/v1/.... I got "signature verification failed" three times before realizing the base URL path prefix is part of the signed payload. The auth docs should include a complete worked example showing exactly what string gets signed, character by character.
+The API key and secret belong in the server's `.env.local`. They enable authenticated requests; they do not pair the Agentic Wallet. A connected browser wallet is another account, and a Binance MPC wallet has its own BSC address. Funding the browser address does not fund the MPC address.
 
-What helped: The llms-full.txt file at web3.binance.com/en/dev-docs/llms-full.txt was genuinely useful — I fed it into my development environment and it saved significant time understanding the API surface. This is a good practice other API providers should adopt.
+The application now offers both execution accounts explicitly. The Agentic Wallet panel shows connection state, BSC address, wallet quota, Developer Mode quota, lock state and session expiry. A connected, unlocked MPC account with Developer Mode enabled was visible during setup. That establishes pairing and permission visibility, not a stock purchase or a funded balance.
 
----
+Elapsed time from opening the documentation to the first successful API call was not recorded reliably. No onboarding-time estimate is included. The most useful improvement would be a single onboarding guide that separates API authentication, wallet pairing, Developer Mode, funding and the first signing request.
 
-Documentation Issues
+## Documentation and integration issues
 
-1. RWA Data API: Two different token list endpoints, unclear which to use
+### RWA discovery and executable metadata
 
-There are two ways to get the tokenized stock list:
+The application combines public stock discovery with authenticated RWA metadata. Discovery identifies representations; execution additionally needs a verified token-to-share ratio, decimals, reference price and market state for the selected contract.
 
-Public endpoint: https://www.binance.com/bapi/defi/v1/public/wallet-direct/buw/wallet/market/token/rwa/stock/detail/list/ai — no auth needed, returns chainId, contractAddress, symbol, ticker, type, but no reference prices, no market status, no company metadata.
+The current adapter joins records by contract address. A discovered stock can be visible without having enough verified metadata to trade. In that case, execution is refused. Discovery coverage is therefore not a guarantee of executable coverage across all three providers.
 
-Authenticated endpoint: GET /api/v1/dex/market/rwa/tokens?binanceChainId=56&platformId=bstock — requires auth, returns referencePrice, tokenPrice, statusInfo.openState, underlyingName, marketCap, peRatioTTM.
+The relevant documentation is the [RWA Data API reference](https://web3.binance.com/en/dev-docs/catalog/web3-wallet/api/rest-api/rwa-data). A useful addition would be a worked example showing how discovery records, platform identifiers, contract addresses and executable metadata connect, including the expected behavior when one representation has no authenticated record. This is an integration request, not a verified claim that a particular platform is unsupported by the API.
 
-The docs don't explain the difference between these two or when to use which. I discovered through trial and error that:
+### Reference prices and market closure
 
-- The public endpoint returns ALL tokens across all providers (bStocks type=3, Ondo type=1, xStocks type=2) in a single call.
-- The authenticated endpoint requires a platformId parameter and only returns tokens for that specific platform. You need two calls (bstock + ondo) to get what the public endpoint gives you in one.
-- The authenticated endpoint does NOT support platformId=xstock — it returns an empty array. xStocks tokens are only available via the public endpoint.
-- The public endpoint uses a different success code format ("000000" string) than the authenticated endpoint (0 integer). This inconsistency caused a bug where my error handling worked for one but not the other.
+The interface displayed weekend or closed-market status with a stale reference, including approximately 28–31 hours since the estimated close during the recorded setup. These are application estimates; they are not a measured timestamp supplied by the reference-price publisher.
 
-Suggestion: Add a comparison table in the docs showing what each endpoint returns. Note that xStocks is not available via the authenticated API.
+A token can trade while its underlying market is closed. Comparing that token with the last underlying reference does not prove overpayment, fair value or an arbitrage opportunity. Earlier discovery wording overstated this by presenting a heuristic as effective execution cost. It now uses “reference-risk score” and explicitly distinguishes discovery from an executable wallet quote.
 
-2. The "type" field in token data is undocumented
+The requested improvement is a reference-price publication timestamp, source, currency, exchange calendar and corporate-action status attached to the price. A closed-market flag alone cannot establish the age or meaning of a reference. Vela's fallback market-hour calculation does not fully model exchange holidays.
 
-The public RWA list returns a type field per token: 1 = Ondo, 2 = xStocks, 3 = bStocks. This mapping is not documented anywhere. I discovered it by cross-referencing token symbols (tokens ending in "on" = Ondo, ending in "x" = xStocks, ending in "B" = bStocks) and confirming against the authenticated API's platformId field. There's also type 4 (SPCX) and type 9 (Binance) which appear in some responses but are not explained.
+### Amounts, decimals and share exposure
 
-3. Reference price staleness is not indicated in the response
+Execution amounts are expressed in the input token's base units. BSC USDT uses 18 decimals in this integration. Stock-token decimals and token-to-share ratios cannot be assumed to match USDT or each other.
 
-The authenticated API returns referencePrice and statusInfo.openState. When openState is false (market closed), the reference price is stale — it's the last price from when the market was open. But the API doesn't tell you how stale it is. There's no lastUpdated timestamp on the reference price.
+Vela converts amounts using decimal-string parsing rather than multiplying floating-point numbers by a large power of ten. Buying and selling reverse the token pair: purchases spend USDT; sales spend the selected issuer's stock token. On-chain stock decimals and balances are checked before a sale.
 
-I had to build my own staleness calculation: check if it's a weekday and the current time is outside NYSE hours (9:30 AM – 4:00 PM ET), then estimate hours since last close. For weekends, I calculate hours since Friday 4 PM ET. This works but it's fragile and timezone-dependent.
+The interface distinguishes stock-token quantity from normalized share exposure. Discovery normalizes token price by the token-to-share ratio; execution calculates share exposure from the actual quoted token quantity. Sales accept an explicit token quantity or sell-all for one selected issuer. Share-count, dollar-value and percentage sales are rejected.
 
-Suggestion: Add a referencePriceUpdatedAt timestamp to the response. This is critical for any product that makes trading decisions based on deviation from reference — which is exactly the use case tokenized stocks are designed for.
+The [Trading API reference](https://web3.binance.com/en/dev-docs/catalog/web3-wallet/api/rest-api/trading-api) would benefit from a complete stock buy-and-sell example covering raw amounts, decimals, share ratios, the approval token and the reversed RFQ pair.
 
-4. Quote API: "amount" parameter expects wei, not human-readable values
+## API pitfalls and error handling
 
-The /api/v1/dex/aggregator/quote endpoint requires amount in wei (18 decimals for USDT on BSC). The docs say "amount" but don't specify the unit. If you pass 500 meaning "$500", you get a quote for 0.0000000000000005 USDT. I had to multiply by 1e18 — BigInt(Math.floor(parseFloat(usdtAmount) * 1e18)).toString().
+### Approval failures are not trade failures with the same remedy
 
-This is standard for on-chain amounts but the docs should state it explicitly, especially since this API targets developers who may be building their first BSC integration.
+A browser-wallet AAPL preview for $5.10 showed:
 
-5. Simulation endpoint response structure varies
+`execution reverted: BEP20: transfer amount exceeds allowance`
 
-The /api/v1/dex/pre-transaction/simulate POST endpoint wraps the simulation result differently depending on whether the transaction succeeds or fails:
+The failed preflight blocked execution. The immediate problem was allowance, rather than evidence that the stock purchase had completed or that the wallet necessarily lacked funds. Approval and funding are separate checks.
 
-Success: data.data.status = "SUCCESS", data.data.balanceChanges is an array.
-Failure: data.data.status = "FAILED", data.data.failReason is a string. But sometimes balanceChanges is undefined instead of an empty array, which causes runtime errors if you don't guard for it.
+The corrected browser flow permits an exact token approval only when this is an allowance-only failure, the quote remains fresh and the other policy checks pass. The server rechecks the account, input balance, BNB and current allowance. After approval, the old quote is discarded and the actual swap must pass a fresh preflight. Approval is never recorded as stock settlement.
 
-I had to add explicit null checks: data.data.balanceChanges || [].
+A structured simulation result distinguishing insufficient allowance, insufficient token balance and insufficient gas would make this recovery less dependent on matching a revert message. The relevant integration point is the [Transaction API](https://web3.binance.com/en/dev-docs/catalog/web3-wallet/api/rest-api/transaction-api).
 
----
+### Small orders and vendor minimums
 
-API Pitfalls
+Vela's application minimum is $5. A minimum accepted by the application does not override the venue's order rules. The interface now states that vendor minimums may be higher and that insufficient funds are checked during preview.
 
-1. Quote expiry is aggressive
+The same distinction matters when selling: a residual stock balance may have a notional value below the executable minimum. A $6 purchase is not a promise that its later sale returns $6 after price movement, spread and fees.
 
-Quote IDs from /api/v1/dex/aggregator/quote expire quickly (observed ~30 seconds). If a user reviews the comparison results for a minute before clicking "Execute", the quote is stale and the swap build fails with a generic error message: "swap build failed". The error doesn't say "quote expired" — it just fails.
+A quote response should expose the applicable minimum, its currency or token unit, whether fees are included, and whether the rule applies to purchases, sales or both. These fields would allow the interface to explain a refusal before requesting signing.
 
-Suggestion: Include expiresAt in the quote response and return a specific error code for expired quotes so the client can auto-refresh.
+### Quote lifetime and signing latency
 
-2. Price impact is inconsistent across vendors
+Vela applies a 25-second freshness window to its execution previews. This is an application safeguard, not a measured statement that every vendor quote expires after exactly 25 seconds.
 
-The priceImpactPercent field in quote responses varies dramatically depending on the vendor (PancakeSwap vs other DEXes). For the same token and amount, one vendor might report 0.01% impact while another reports 2.3%. This isn't a bug per se — different liquidity pools have different depth — but it makes comparison harder. It would help if the docs explained that price impact is vendor-specific and comes directly from the DEX, not normalized by the aggregator.
+Wallet review and App confirmation can consume that window. The retained order binds the wallet, token pair, amount, deadline and signing payload; expired or changed state must be refreshed rather than silently replaced under an existing signature.
 
-3. Honeypot detection returns false negatives
+The requested API improvement is an explicit quote expiry and a distinct expired-quote error. For RFQ orders, an order-status reference should remain usable after submission so recovery does not depend on resubmitting the same trade.
 
-The isHoneyPot field on toToken in quote responses was false for every tokenized stock token I tested, including some with very thin liquidity. This field appears to always be false for RWA tokens, which makes it useless as a safety signal for this asset class. It would be more useful to have a liquidityDepthUSD field so developers can make their own risk assessment.
+### EVM simulation and RFQ validation are different
 
-4. Rate limiting is generous but undocumented
+An EVM swap has calldata that can be simulated before broadcast. An RFQ has an EIP-712 order that a relayer settles later. Validating the typed order does not simulate that future transaction.
 
-During development I made thousands of API calls without hitting rate limits. The docs mention "elevated rate limits" for hackathon participants but don't specify what the normal or elevated limits actually are. For a production product, I'd need to know the exact limits to implement proper backoff.
+Vela labels these separately. RFQ validation checks domain, token pair, spend, recipient, output bound and deadline, as well as funding. Unsupported typed-data structures are refused. A successful signature or returned order ID remains pending until settlement is verified.
 
----
+A single documented example tracing quote, swap construction, order signature, submission, order status and settlement hash would reduce ambiguity. Separate examples are needed for EVM swaps and RFQ orders.
 
-AI Stack Feedback
+## Agentic Wallet and AI stack
 
-Agentic Wallet
+### Pairing and permission visibility
 
-I integrated the Agentic Wallet pipeline: token approval check, swap building, transaction simulation, and balance verification. The pipeline is functional — every step makes real API calls and returns useful data.
+Initial setup surfaced “Invalid Binance pairing response” and subsequently a rejected sign-in link. The local adapter needed to handle the actual CLI response while preserving strict link validation. Supported login links are HTTPS on trusted Binance hosts; lookalike hosts and malformed links remain rejected.
 
-What worked:
+The current integration uses official `@binance/agentic-wallet@1.10.0`, installed locally, and the CLI's supported session-directory configuration. The pairing verifier remains active while the user completes Binance App confirmation. The connected wallet panel subsequently displayed a BSC address, unlocked state, session expiry and Developer Mode enabled.
 
-- The approve, quote, swap, simulate, execute pipeline is logically sound and maps well to a multi-step autonomous agent flow.
-- Transaction simulation before execution is the right pattern. I use it as a gate in the policy engine — if simulation fails, the agent blocks the trade.
+The [Agentic Wallet documentation](https://developers.binance.com/en/docs/products/agentic-wallet/welcome) and its authentication/external-signing references would be easier to integrate with a versioned JSON schema for success, pending confirmation, rejection and expiry. Copyable response examples should include the exact sign-in URL and pairing-code fields.
 
-What didn't work:
+### Local origin handling
 
-- The agentic pipeline cannot actually sign transactions server-side. The finalTxHash is always null because the server doesn't hold private keys. For true autonomous execution, I had to receive txData from the server and sign it client-side via ethers.js BrowserProvider. This means "agentic" execution still requires the user's wallet to be connected and to approve the transaction — it's not truly autonomous.
-- There's no session key or delegated signing mechanism documented. The Binance Agentic Wallet SDK references session keys but the Web3 API doesn't expose them. For a truly agentic product, the agent needs to be able to sign within its own key scope, bounded by the user's policy. This is the biggest missing piece.
+“Cross-origin execution requests are not permitted” appeared during local use. This was an application origin-check problem, unrelated to API-key validity or account balance. Next.js can add forwarding headers and an internal request URL that differs from the browser-facing origin.
 
-What's missing:
+The corrected guard validates the browser-facing host/origin pair and matching framework forwarding information, while rejecting mismatched authorities and cross-site requests. The local signing bridge remains unavailable through public hosts.
 
-- Delegated signing with spending limits — "this agent can execute up to $X per day on my behalf without prompting my wallet."
-- A callback/webhook mechanism so the agent can be notified when conditions change, rather than polling.
-- The ability to set a trade expiry — "execute this trade if conditions are met within the next 4 hours, then expire."
+### Signing scope
 
-BNB Agent Studio / ERC-8004
+Vela requests external-signing previews, displays the parsed operation and risks, and requires explicit confirmation. Additional Binance App confirmation depends on the wallet's rules. The application reads security settings; it cannot enable Developer Mode or change the user's quotas.
 
-I registered Vela as an on-chain agent via the ERC-8004 IdentityRegistry on BSC. The registration mints an ERC-721 NFT that represents the agent's identity, with metadata describing its capabilities.
+This is assisted MPC execution, not an unattended strategy runtime. AI intent parsing does not grant spending authority. Natural-language input has a deterministic fallback and unsupported intents are rejected before signing.
 
-What worked:
+Useful additions would be documented permission scopes for external signing, clear quota units, structured reasons for App-required confirmation, and recovery guidance for a timeout after signing may already have begun. A retry must not create a second financial operation merely because the first response was delayed.
 
-- The ERC-8004 contract interface is clean. register(agentURI, metadata[]) with tuple encoding is straightforward if you know Solidity ABI encoding.
-- The concept of agent identity as an NFT is sound — it gives the agent a verifiable, on-chain-provable identity that can be referenced in decision receipts.
+### ERC-8004 and Agent Studio
 
-What I'd want:
+The Agent page supports identity metadata registration. An observed registration error was:
 
-- Integration between Agent Studio identity and the Binance Web3 API — "this API call is being made by agent #4721, whose policy allows X." Right now the agent identity and the trading API are completely separate systems.
-- A way to attach decision receipts to the agent's on-chain identity — proving not just that the agent exists, but what it decided and why.
+`Failed to execute 'btoa' on 'Window': The string to be encoded contains characters outside of the Latin1 range.`
 
----
+The fix encodes metadata as UTF-8 before producing the data URI. This was a browser encoding bug in Vela, not an ERC-8004 contract failure or evidence of insufficient BNB.
 
-Tokenized Stock Specifics
+Identity registration is separate from wallet provisioning, autonomous hosting and x402 payments. No completed identity registration or managed Agent Studio runtime is claimed in this report. The requested platform improvement is a worked example connecting agent identity, signing permissions, runtime tasks and verifiable execution evidence without treating these as interchangeable features.
 
-Liquidity depth varies dramatically
+## Tokenized-stock behavior
 
-For the same underlying stock (e.g., NVDA), liquidity across providers differs by orders of magnitude:
+Vela treats issuer representations as distinct tokens. Holdings in one issuer cannot be sold by selecting another issuer with the same underlying ticker. Contract address, chain, decimals and share ratio matter throughout quote construction and settlement verification.
 
-bStocks: Generally highest volume. DEX quotes return tight spreads.
-Ondo: Moderate volume. Spreads are wider but acceptable for amounts under $5,000.
-xStocks: Very thin liquidity on most tickers. Price impact can exceed 5% on a $500 trade.
+The available volume fields are shown as source units and activity proxies. They are not a measured executable liquidity-depth curve. This report does not rank provider liquidity, quote a universal maximum trade size, or claim a honeypot false negative from thin liquidity. A honeypot flag and market depth answer different questions.
 
-This is the core problem Vela solves — without comparing across providers, a user on xStocks might pay 5% more than they would on bStocks for the exact same exposure.
+Cross-provider discovery also does not establish cross-provider arbitrage. That would require executable quotes for both legs, fees, inventory, settlement timing and equivalent exposure. Vela currently assists a selected representation's spot trade.
 
-After-hours behavior is the real story
+Requested stock-specific fields include verified share-ratio effective dates, corporate-action status, reference timestamps and executable depth for a stated order size. These would make refusals explainable and comparisons less dependent on local assumptions.
 
-The hackathon description nails it: "The closing bell rings and every stock price in the country freezes." In practice:
+## Decision evidence and recovery
 
-- Reference prices freeze at NYSE close (4 PM ET). The on-chain tokens keep trading.
-- By Saturday afternoon, I observed tokenized NVDA trading 2.37% above the last reference price. On a $500 trade, that's $12 of invisible overpayment.
-- There is no warning in the API response that the reference is stale. The openState: false flag tells you the market is closed, but the reference price still looks like a real price.
-- Monday morning, when the reference updates, the deviation snaps back. Any trade executed over the weekend was priced against stale data.
+An earlier interface showed “Trade complete” with a receipt link whose record was empty. That is an application correctness issue: a success label without settlement evidence cannot establish execution.
 
-This is why I built the policy engine with blockAfterHours and maxDeviation constraints. Without them, an autonomous agent would happily execute trades at 2%+ deviation from reference — technically profitable for the market maker, costly for the user.
+Current previews and receipts are stored atomically on the local server. Browser history points to those records. Confirmation requires a successful BSC mainnet transaction and matching net input/output token transfers. Receipts retain the quote, policy result, preflight scope, signing evidence where available, execution state and refusal reason. Pending operations can be rechecked rather than automatically repeated.
 
-The three providers differ more than expected
+Receipt checksums detect modifications but are not signed attestations. Refusal records document application decisions; they do not independently prove historical market inputs. A BscScan link becomes settlement evidence only when it points to the actual matching transaction, not an approval or unrelated transfer.
 
-bStocks:
-  Token naming: {TICKER}B (e.g., NVDAB)
-  Liquidity: High on popular tickers
-  Price tracking: Tight to reference
-  API coverage: Full (public + authenticated)
-  Token-to-share ratio: Varies (often 0.001 or 0.01)
+The storage design requires a durable Node server filesystem. Ephemeral serverless storage cannot preserve local signing sessions and execution recovery records. This deployment limitation is documented rather than presenting a static frontend as a complete hosted execution service.
 
-Ondo:
-  Token naming: {TICKER}on (e.g., NVDAon)
-  Liquidity: Moderate
-  Price tracking: ~0.5-1% deviation typical
-  API coverage: Full (public + authenticated)
-  Token-to-share ratio: Usually 1:1
+## Measurement and remaining evidence
 
-xStocks:
-  Token naming: {TICKER}x (e.g., NVDAx)
-  Liquidity: Low-very low
-  Price tracking: 1-3%+ deviation common
-  API coverage: Public only (no authenticated data)
-  Token-to-share ratio: Varies
+The flight recorder keeps up to 500 API records in memory for the server process and exposes endpoint, status, latency, response size and error summaries. It is not a permanent audit log of every request. Its export must be saved before a restart when used as measurement evidence.
 
-The token-to-share ratio is particularly tricky. A bStocks NVDA token priced at $0.13 represents 0.001 shares, so the implied share price is $130. But an Ondo NVDA token priced at $130 represents 1 share. You have to divide by tokenToShareRatio to get comparable prices, and this ratio is different for every token on every provider. I built this normalization into the comparison engine, but it should be documented clearly.
+No retained benchmark dataset supports the earlier draft's precise latency figures, rate-limit claims or first-call timing. Those figures have been removed. The fixture tests exercise failure handling, order validation, approval boundaries, pairing and receipts; they do not demonstrate a funded mainnet round trip.
 
----
+The remaining experiential evidence is a wallet-approved purchase with its matching decision receipt and BscScan transaction, a separate sell verification if round-trip behavior is claimed, and saved API telemetry for any performance conclusions. Personal onboarding timing and documentation-page observations should come from the participant's own records.
 
-Redesign Suggestions
+## Priority platform recommendations
 
-1. Unified token endpoint
+| Request | Practical benefit |
+| --- | --- |
+| Versioned CLI JSON schemas and pairing examples | Reliable authentication and confirmation handling |
+| Complete stock EVM and RFQ lifecycle examples | Clear distinction between approval, signature, submission and settlement |
+| Quote expiry and structured order minimums | Useful refusal messages before signing |
+| Structured simulation failure categories | Safe allowance recovery without misclassifying balance or gas failures |
+| Reference timestamps, exchange calendars and corporate-action metadata | Explicit treatment of stale references and changing share exposure |
+| Per-size executable depth and documented volume units | Meaningful comparisons without presenting volume as liquidity |
+| Idempotent recovery and confirmation-status examples | Fewer duplicate submissions after timeouts |
+| Clear separation of identity, wallet permissions and managed runtime | Accurate onboarding for the optional AI stack |
 
-Merge the public and authenticated token lists into a single endpoint that returns everything: contract addresses, reference prices, market status, company metadata, provider IDs, and a referencePriceUpdatedAt timestamp. One call instead of three.
-
-2. Staleness metadata on every price
-
-Every price field in the API (tokenPrice, referencePrice) should include:
-  - updatedAt — timestamp of last update
-  - source — where this price came from (DEX, oracle, NYSE)
-  - isStale — boolean, set by the server based on market hours
-
-3. Provider comparison endpoint
-
-A new endpoint that takes a ticker and returns all representations side by side: providers, prices, liquidity depth, deviation from reference, and a recommended provider. This is what I had to build from scratch using 4 different API calls and a custom comparison engine.
-
-4. WebSocket feed for reference price updates
-
-The biggest gap for autonomous agents: there's no way to know when the reference price updates. I have to poll. A WebSocket that pushes reference price changes would enable event-driven agents that react to market opens rather than polling every minute.
-
----
-
-Requested Capabilities
-
-1. referencePriceUpdatedAt timestamp on all price responses
-2. Provider comparison endpoint — /api/v1/dex/market/rwa/compare?ticker=NVDA returning all providers with normalized prices
-3. Quote expiry timestamp in quote responses
-4. Expired quote error code — distinct from generic failure
-5. Delegated signing / session keys — so agents can truly execute autonomously within policy bounds
-6. WebSocket feed for reference price updates and market open/close events
-7. Liquidity depth metric (in USD) per token, not just isHoneyPot
-8. xStocks in authenticated API — currently returns empty array for platformId=xstock
-9. Consistent response format — use the same success/error structure across public and authenticated endpoints
-10. Trade expiry — submit a conditional trade that expires after N hours if not executed
-
----
-
-Modules Used
-
-RWA Data API: Token discovery, reference prices, market status, company metadata, sector classification
-Trading API: DEX aggregator quotes, swap building, cross-vendor comparison, real price impact
-Transaction API: On-chain simulation as policy gate — block trade if simulation fails
-Wallet API: Portfolio positions, balance checks, concentration calculation
-Agentic Wallet: Multi-step execution pipeline: approve, quote, swap, simulate, verify
-ERC-8004 (Agent Studio): On-chain agent identity registration, capability metadata, verifiable decision receipts
-
-Build Telemetry
-
-Vela includes a flight recorder that logs every API call: endpoint, method, latency, status, response size, and errors. This data informed this report. Typical latencies observed:
-
-Public RWA list: ~200ms (fast, cacheable)
-Authenticated RWA tokens (per platform): ~400ms (two calls needed for bstock + ondo)
-DEX aggregator quote: ~800ms (varies by token liquidity)
-Swap build: ~600ms (requires valid quote ID)
-Transaction simulation: ~1.2s (slowest call in the pipeline)
-
-Full discovery flow (find tokens, fetch representations, get quotes for each, reference price, policy evaluation): ~3-4 seconds total for a ticker with 3 providers. This is acceptable for interactive use but would benefit from parallel execution and caching for agent loops.
+These requests follow the integration boundaries encountered in Vela. They are not assertions that an undocumented capability is unavailable across the entire Binance platform.

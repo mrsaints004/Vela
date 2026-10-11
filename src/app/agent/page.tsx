@@ -1,12 +1,12 @@
 "use client";
 
+import {AgenticWalletPanel} from '@/components/agent/AgenticWalletPanel';
 import { useState } from "react";
 import { useAgentStore } from "@/lib/stores/agent";
 import { useWalletStore } from "@/lib/stores/wallet";
 import {
   registerAgent,
   getAgentIdentity,
-  getOwnedAgents,
   IDENTITY_REGISTRY,
   IDENTITY_REGISTRY_TESTNET,
 } from "@/lib/agent-studio/erc8004";
@@ -20,18 +20,18 @@ const VELA_CAPABILITIES = [
   "tokenized-stock-discovery",
   "cross-provider-comparison",
   "policy-bounded-execution",
-  "autonomous-trade-execution",
+  "wallet-approved-trade-execution",
   "decision-receipt-generation",
   "market-hours-awareness",
   "slippage-estimation",
-  "on-chain-simulation",
+  "swap-simulation-and-rfq-order-preflight",
 ];
 
 export default function AgentPage() {
   const { connected, address, connect, connecting } = useWalletStore();
   const {
     agentId, txHash, registered, registering, error, useTestnet,
-    setRegistered, setRegistering, setError, setUseTestnet, reset,
+    setRegistered, setRegistering, setError, setUseTestnet,
   } = useAgentStore();
 
   const [liveAgent, setLiveAgent] = useState<AgentIdentity | null>(null);
@@ -50,11 +50,11 @@ export default function AgentPage() {
         {
           name: "Vela",
           description:
-            "Autonomous execution agent for tokenized equities on BSC. " +
+            "Assisted execution for tokenized equities on BSC. " +
             "Discovers representations across bStocks, Ondo, and xStocks, " +
             "evaluates user-defined policy constraints, simulates transactions, " +
-            "and executes autonomously when policy permits — generating " +
-            "verifiable decision receipts for every action.",
+            "and requests wallet approval after policy checks — generating " +
+            "durable execution-preview receipts with independently checkable settlement evidence.",
           capabilities: VELA_CAPABILITIES,
           version: "0.1.0",
           serviceEndpoint: typeof window !== "undefined" ? window.location.origin : "",
@@ -69,19 +69,22 @@ export default function AgentPage() {
   }
 
   async function handleLookup() {
-    if (!agentId) return;
+    if (agentId===null) return;
     setLookingUp(true);
     try {
       const identity = await getAgentIdentity(agentId, useTestnet);
+      if (!identity) throw new Error("Identity not found on the selected network.");
+      if (identity.owner.toLowerCase() !== address?.toLowerCase()) throw new Error("This identity belongs to another wallet.");
       setLiveAgent(identity);
-    } catch {
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Identity lookup failed.");
       setLiveAgent(null);
     }
     setLookingUp(false);
   }
 
   function copyAgentId() {
-    if (agentId) {
+    if (agentId!==null) {
       navigator.clipboard.writeText(String(agentId));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -90,13 +93,19 @@ export default function AgentPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      <AgenticWalletPanel/>
+      <div className="border border-border rounded-xl p-4 text-sm text-text-secondary space-y-2">
+        <p>Registration creates an identity NFT. It does not move your USDT, create trading funds, or allow unattended spending.</p>
+        <p>You need BNB on the selected network to pay registration gas. Trading uses BSC mainnet USDT and may require BNB for approvals.</p>
+        <p>Binance Agentic Wallet signing is available above and in Trade. Its MPC wallet account is separate from this browser-wallet identity registration. BNB Agent Studio runtime is not integrated.</p>
+      </div>
       {/* Header */}
       <div>
         <h1 className="text-xl font-semibold text-text-primary tracking-tight mb-1">
-          Agent Studio
+          Agent Identity
         </h1>
         <p className="text-sm text-text-muted">
-          Register Vela as an on-chain autonomous agent via{" "}
+          Register an on-chain identity for Vela via{" "}
           <a
             href="https://eips.ethereum.org/EIPS/eip-8004"
             target="_blank"
@@ -120,11 +129,11 @@ export default function AgentPage() {
             <div>
               <h2 className="text-sm font-semibold text-text-primary">Vela Agent</h2>
               <p className="text-[10px] text-text-muted">
-                Autonomous execution layer for tokenized equities
+                Identity metadata for assisted stock execution
               </p>
             </div>
           </div>
-          {registered && agentId && (
+          {registered && agentId!==null && (
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-gain/10 text-gain text-[10px] font-medium">
                 <CheckCircle className="w-3 h-3" />
@@ -147,18 +156,18 @@ export default function AgentPage() {
           {/* Capabilities grid */}
           <div>
             <div className="text-xs text-text-muted uppercase tracking-wider mb-3">
-              Registered Capabilities
+              Declared Product Capabilities
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { icon: Search, label: "Discovery", desc: "Cross-provider token discovery" },
-                { icon: Layers, label: "Comparison", desc: "Effective cost ranking" },
-                { icon: Shield, label: "Policy Engine", desc: "12-check constraint evaluation" },
+                { icon: Layers, label: "Comparison", desc: "Reference-risk comparison" },
+                { icon: Shield, label: "Policy Engine", desc: "Verified execution preflight" },
                 { icon: Activity, label: "Simulation", desc: "On-chain tx simulation" },
-                { icon: Zap, label: "Auto-Execute", desc: "Policy-bounded autonomy" },
+                { icon: Zap, label: "Wallet Approval", desc: "You approve every trade" },
                 { icon: FileText, label: "Receipts", desc: "Verifiable decision trail" },
                 { icon: Bot, label: "AI Intent", desc: "Natural language parsing" },
-                { icon: Wallet, label: "Agentic Wallet", desc: "Autonomous signing" },
+                { icon: Wallet, label: "Browser Wallet", desc: "Signs with your permission" },
               ].map(({ icon: Icon, label, desc }) => (
                 <div key={label} className="border border-border/50 rounded-lg p-2.5">
                   <Icon className="w-3.5 h-3.5 text-text-muted mb-1.5" />
@@ -198,14 +207,15 @@ export default function AgentPage() {
                     {useTestnet ? "BSC Testnet" : "BSC Mainnet"}
                   </span>
                   <button
-                    onClick={() => setUseTestnet(!useTestnet)}
+                    disabled={registering||lookingUp}
+                    onClick={() => { setLiveAgent(null); setUseTestnet(!useTestnet); }}
                     className="text-[10px] text-accent hover:underline"
                   >
                     Switch to {useTestnet ? "Mainnet" : "Testnet"}
                   </button>
                 </div>
               </div>
-              {registered && agentId && (
+              {registered && agentId!==null && (
                 <>
                   <div className="flex items-center justify-between">
                     <span className="text-text-muted">Agent ID (NFT)</span>
@@ -296,7 +306,7 @@ export default function AgentPage() {
               ) : (
                 <>
                   <Bot className="w-4 h-4" />
-                  Register Agent via ERC-8004
+                  Register Identity via ERC-8004
                 </>
               )}
             </button>

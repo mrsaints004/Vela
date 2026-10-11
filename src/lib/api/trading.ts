@@ -1,218 +1,57 @@
-import crypto from "crypto";
-
-const BASE_URL = "https://web3.binance.com";
-const BSC_CHAIN_ID = "56";
-export const USDT_BSC = "0x55d398326f99059fF775485246999027B3197955";
-
-function getCredentials() {
-  const apiKey = process.env.BINANCE_WEB3_API_KEY;
-  const secretKey = process.env.BINANCE_WEB3_SECRET_KEY;
-  if (!apiKey || !secretKey) throw new Error("API credentials not configured");
-  return { apiKey, secretKey };
-}
-
-function signRequest(secretKey: string, timestamp: string, method: string, pathWithQuery: string, body: string = "") {
-  const preHash = `${timestamp}${method}${pathWithQuery}${body}`;
-  return crypto.createHmac("sha256", secretKey).update(preHash, "utf8").digest("base64");
-}
-
-async function apiCall(method: "GET" | "POST", path: string, params?: Record<string, string>, body?: object) {
-  const { apiKey, secretKey } = getCredentials();
-  const timestamp = new Date().toISOString();
-  const startTime = Date.now();
-
-  let fullPath = `/build${path}`;
-  if (params && method === "GET") {
-    const qs = new URLSearchParams(params).toString();
-    if (qs) fullPath += `?${qs}`;
-  }
-
-  const bodyStr = body ? JSON.stringify(body) : "";
-  const signature = signRequest(secretKey, timestamp, method, fullPath, bodyStr);
-
-  const res = await fetch(`${BASE_URL}${fullPath}`, {
-    method,
-    headers: {
-      "X-OC-APIKEY": apiKey,
-      "X-OC-TIMESTAMP": timestamp,
-      "X-OC-SIGN": signature,
-      "Content-Type": "application/json",
-    },
-    body: method === "POST" ? bodyStr : undefined,
-  });
-
-  const data = await res.json();
-  const latency = Date.now() - startTime;
-
-  return { data, latency, status: res.status };
-}
-
-// --- Quote ---
-
-export interface QuoteRoute {
-  dexName: string;
-  percent: string;
-  fromSymbol: string;
-  toSymbol: string;
-}
-
+import { isAddress } from 'ethers';
+import { USDT_BSC, amountUnits, validateApproval, parseTypedOrder, type EvmTx, type SwapTx } from '../engine/order';
+export { USDT_BSC, amountUnits, validateApproval, parseTypedOrder, validateTypedOrder } from '../engine/order';
+export type { EvmTx, SwapTx, TypedOrder } from '../engine/order';
+import { signedCall, object, textField, numberField } from './client';
+export interface TradePair {inputToken:string;outputToken:string;rawInput:string}
+const prefix = '/api/v1/dex/aggregator';
 export interface Quote {
-  quoteId: string;
-  vendorName: string;
-  executionMode: string;
-  fromTokenAmount: string;
-  toTokenAmount: string;
-  tradeFee: string;
-  estimateGasFee: string;
-  priceImpactPercent: string;
-  fromTokenSymbol: string;
-  fromTokenPrice: string;
-  toTokenSymbol: string;
-  toTokenPrice: string;
-  isHoneyPot: boolean;
-  routes: QuoteRoute[];
-  approveTarget: string;
-  isBest: boolean;
+  quoteId: string; vendorName: string; executionMode: 'SWAP' | 'RFQ';
+  fromTokenAmount: string; toTokenAmount: string; toDecimals: number;
+  tradeFee: string; estimateGasFee: string; priceImpactPercent: string;
+  isHoneyPot: boolean; routes: { dexName: string; percent: string }[]; approveTarget: string; isBest: boolean;
 }
-
-export async function getQuote(
-  toTokenAddress: string,
-  usdtAmount: string,
-  walletAddress: string
-): Promise<{ quotes: Quote[]; latency: number }> {
-  // Convert USD to wei (18 decimals)
-  const amountWei = BigInt(Math.floor(parseFloat(usdtAmount) * 1e18)).toString();
-
-  const { data, latency } = await apiCall("GET", "/api/v1/dex/aggregator/quote", {
-    binanceChainId: BSC_CHAIN_ID,
-    fromTokenAddress: USDT_BSC,
-    toTokenAddress,
-    amount: amountWei,
-    userWalletAddress: walletAddress,
+export async function getQuote(token: string, amount: string, wallet: string, pair?:TradePair) {
+  const route=pair||{inputToken:USDT_BSC,outputToken:token,rawInput:amountUnits(amount)};
+  if(!isAddress(route.inputToken)||!isAddress(route.outputToken)||!/^\d+$/.test(route.rawInput)||BigInt(route.rawInput)<=0n)throw new Error("Invalid trade token pair or input amount.");
+  if (!isAddress(token) || !isAddress(wallet)) throw new Error('A valid token and connected wallet are required.');
+  const { data, latency } = await signedCall('GET', `${prefix}/quote`, { binanceChainId: '56', fromTokenAddress: route.inputToken, toTokenAddress: route.outputToken, amount: route.rawInput, userWalletAddress: wallet });
+  if (!Array.isArray(data)) throw new Error('Quote response must be an array.');
+  const quotes: Quote[] = data.map((value) => {
+    const q = object(value), output = object(q.toToken), input=object(q.fromToken);
+    if(textField(output.tokenContractAddress).toLowerCase()!==route.outputToken.toLowerCase() || textField(input.tokenContractAddress).toLowerCase()!==route.inputToken.toLowerCase() || textField(q.fromTokenAmount)!==route.rawInput) throw new Error('Quote token pair or input differs from the requested purchase.');
+    const safety=route.inputToken.toLowerCase()===USDT_BSC.toLowerCase()?output:input;
+    if(typeof safety.isHoneyPot!=='boolean') throw new Error('Quote token safety data is missing.');
+    const decimals = numberField(output.decimal); if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error('Invalid output decimals.');
+    if (q.executionMode !== 'SWAP' && q.executionMode !== 'RFQ') throw new Error('Unsupported quote execution mode.');
+    return { quoteId: textField(q.quoteId), vendorName: textField(q.vendorName), executionMode: q.executionMode, fromTokenAmount: textField(q.fromTokenAmount), toTokenAmount: textField(q.toTokenAmount), toDecimals: decimals, tradeFee: textField(q.tradeFee, '0'), estimateGasFee: textField(q.estimateGasFee, '0'), priceImpactPercent: textField(q.priceImpactPercent), isHoneyPot: safety.isHoneyPot === true, routes: (Array.isArray(q.dexRouterList) ? q.dexRouterList : []).map(r => { const p = object(object(r).dexProtocol); return { dexName: textField(p.dexName), percent: textField(p.percent) }; }), approveTarget: textField(q.approveTarget), isBest: q.isBest === true };
   });
-
-  if (data.code !== 0 || !data.data) {
-    throw new Error(`Quote failed: ${data.msg || JSON.stringify(data)}`);
-  }
-
-  const quotes: Quote[] = (data.data as any[]).map((q: any) => ({
-    quoteId: q.quoteId,
-    vendorName: q.vendorName,
-    executionMode: q.executionMode,
-    fromTokenAmount: q.fromTokenAmount,
-    toTokenAmount: q.toTokenAmount,
-    tradeFee: q.tradeFee,
-    estimateGasFee: q.estimateGasFee,
-    priceImpactPercent: q.priceImpactPercent,
-    fromTokenSymbol: q.fromToken?.tokenSymbol || "USDT",
-    fromTokenPrice: q.fromToken?.tokenUnitPrice || "1",
-    toTokenSymbol: q.toToken?.tokenSymbol || "",
-    toTokenPrice: q.toToken?.tokenUnitPrice || "0",
-    isHoneyPot: q.toToken?.isHoneyPot || false,
-    routes: (q.dexRouterList || []).map((r: any) => ({
-      dexName: r.dexProtocol?.dexName || "Unknown",
-      percent: r.dexProtocol?.percent || "100",
-      fromSymbol: r.fromToken?.tokenSymbol || "",
-      toSymbol: r.toToken?.tokenSymbol || "",
-    })),
-    approveTarget: q.approveTarget || "",
-    isBest: q.isBest || false,
-  }));
-
   return { quotes, latency };
 }
-
-// --- Swap Build ---
-
-export interface SwapTx {
-  executionMode: string;
-  from: string;
-  to: string;
-  value: string;
-  data: string;
-  hasRFQ: boolean;
+export async function getApproval(amount: string, vendor: string, spender: string, pair?:TradePair): Promise<EvmTx[]> {
+  const inputToken=pair?.inputToken||USDT_BSC, rawInput=pair?.rawInput||amountUnits(amount);
+  const { data } = await signedCall('GET', `${prefix}/approve-transaction`, { binanceChainId: '56', tokenContractAddress: inputToken, approveAmount: rawInput, vendor });
+  if (!Array.isArray(data) || !data.length) throw new Error('Approval data unavailable.');
+  return data.map(value => { const d = object(value); const tx = { to: textField(d.to, inputToken), data: textField(d.data), value: textField(d.value, '0') }; validateApproval(tx, rawInput, spender,inputToken); return tx; });
 }
-
-export async function buildSwap(
-  toTokenAddress: string,
-  usdtAmount: string,
-  walletAddress: string,
-  quoteId: string,
-  slippagePercent: string = "1"
-): Promise<{ swap: SwapTx; latency: number }> {
-  const amountWei = BigInt(Math.floor(parseFloat(usdtAmount) * 1e18)).toString();
-
-  const { data, latency } = await apiCall("GET", "/api/v1/dex/aggregator/swap", {
-    binanceChainId: BSC_CHAIN_ID,
-    fromTokenAddress: USDT_BSC,
-    toTokenAddress,
-    amount: amountWei,
-    quoteId,
-    userWalletAddress: walletAddress,
-    slippagePercent,
-  });
-
-  if (data.code !== 0 || !data.data) {
-    throw new Error(`Swap build failed: ${data.msg || JSON.stringify(data)}`);
-  }
-
-  const d = data.data;
-  const tx = d.tx || d.swapTransaction || {};
-
-  return {
-    swap: {
-      executionMode: d.executionMode || "SWAP",
-      from: tx.from || walletAddress,
-      to: tx.to || "",
-      value: tx.value || "0",
-      data: tx.data || "",
-      hasRFQ: Boolean(d.rfq?.typedDataToSign),
-    },
-    latency,
-  };
+export async function buildSwap(token: string, amount: string, wallet: string, quoteId: string, slippage = '0.5', pair?:TradePair) {
+  const route=pair||{inputToken:USDT_BSC,outputToken:token,rawInput:amountUnits(amount)};
+  const { data, latency } = await signedCall('GET', `${prefix}/swap`, { binanceChainId: '56', fromTokenAddress: route.inputToken, toTokenAddress: route.outputToken, amount: route.rawInput, quoteId, userWalletAddress: wallet, slippagePercent: slippage, approveTransaction: 'true' });
+  const d = object(data), tx = d.tx ? object(d.tx) : {};
+  if (d.executionMode !== 'RFQ' && d.executionMode !== 'SWAP') throw new Error('Unsupported execution mode.');
+  const rfq = d.executionMode === 'RFQ' ? object(d.rfq) : null;
+  const swap: SwapTx = { from: textField(tx.from, wallet), to: textField(tx.to), value: textField(tx.value, '0'), data: textField(tx.data), executionMode: d.executionMode, hasRFQ: !!rfq, rfq: rfq ? { vendor: textField(rfq.vendor), orderId: textField(rfq.orderId, quoteId), signingScheme: textField(rfq.signingScheme, 'EIP712'), typedData: parseTypedOrder(rfq.typedDataToSign) } : null };
+  if (swap.executionMode === 'SWAP' && (!isAddress(swap.to) || !/^0x[0-9a-f]+$/i.test(swap.data))) throw new Error('Missing executable swap calldata.');
+  return { swap, latency };
 }
-
-// --- Simulation ---
-
-export interface SimulationResult {
-  status: "SUCCESS" | "FAILED";
-  failReason: string | null;
-  balanceChanges: Array<{
-    address: string;
-    symbol: string;
-    amount: string;
-    direction: string;
-  }>;
+export async function simulateTransaction(from: string, to: string, value: string, calldata: string) {
+  const { data, latency } = await signedCall('POST', '/api/v1/dex/pre-transaction/simulate', undefined, { binanceChainId: '56', evmTx: { from, to, value, data: calldata } });
+  const d = object(data);
+  return { simulation: { status: d.status === 'SUCCESS' && !d.failReason ? 'SUCCESS' as const : 'FAILED' as const, failReason: textField(d.failReason) || null, balanceChanges: (Array.isArray(d.balanceChanges) ? d.balanceChanges : []).map(v => { const b = object(v); return { address: textField(b.contractAddress), symbol: textField(b.tokenSymbol, textField(b.contractAddress)), amount: textField(b.change, '0'), direction: String(b.change).startsWith('-') ? 'out' : 'in' }; }) }, latency };
 }
-
-export async function simulateTransaction(
-  from: string,
-  to: string,
-  value: string,
-  calldata: string
-): Promise<{ simulation: SimulationResult; latency: number }> {
-  const { data, latency } = await apiCall("POST", "/api/v1/dex/pre-transaction/simulate", undefined, {
-    binanceChainId: BSC_CHAIN_ID,
-    evmTx: { from, to, value, data: calldata },
-  });
-
-  if (data.code !== 0) {
-    throw new Error(`Simulation failed: ${data.msg || JSON.stringify(data)}`);
-  }
-
-  const d = data.data || {};
-
-  return {
-    simulation: {
-      status: d.status || "FAILED",
-      failReason: d.failReason || null,
-      balanceChanges: (d.balanceChanges || []).map((bc: any) => ({
-        address: bc.tokenAddress || "",
-        symbol: bc.tokenSymbol || "",
-        amount: bc.amount || "0",
-        direction: bc.direction || "unknown",
-      })),
-    },
-    latency,
-  };
+export async function submitOrder(requestId: string, signature: string, swap: SwapTx) {
+  if (!swap.rfq) throw new Error('RFQ order required.');
+  const { data } = await signedCall('POST', `${prefix}/order/submit`, undefined, { requestId, userSignature: signature, vendor: swap.rfq.vendor, quoteId: swap.rfq.orderId, signingScheme: swap.rfq.signingScheme });
+  const d = object(data); if (!textField(d.orderId)) throw new Error('Missing submitted order ID.'); return { orderId: textField(d.orderId), status: textField(d.status) };
 }
+export async function getOrder(orderId: string) { const { data } = await signedCall('GET', `${prefix}/order/${encodeURIComponent(orderId)}`); const d = object(data); return { orderId, status: textField(d.status), txHash: textField(d.txHash) || null }; }

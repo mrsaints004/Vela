@@ -50,7 +50,7 @@ export function ComparisonTable({ costs, selectedProvider, onSelect }: Compariso
     },
     {
       key: "liquidityRating",
-      label: "Liquidity",
+      label: "Activity proxy",
       align: "right",
       render: (row) => (
         <span className={`text-xs font-mono ${
@@ -64,7 +64,7 @@ export function ComparisonTable({ costs, selectedProvider, onSelect }: Compariso
     },
     {
       key: "estimatedSlippage",
-      label: "Slippage",
+      label: "Impact estimate",
       align: "right",
       mono: true,
       sortable: true,
@@ -73,7 +73,7 @@ export function ComparisonTable({ costs, selectedProvider, onSelect }: Compariso
     },
     {
       key: "totalEffectiveCost",
-      label: "Eff. Cost",
+      label: "Ref. risk score",
       align: "right",
       mono: true,
       sortable: true,
@@ -86,9 +86,10 @@ export function ComparisonTable({ costs, selectedProvider, onSelect }: Compariso
     <div className="bg-surface-1 border border-border rounded-xl">
       <div className="px-4 py-3 border-b border-border">
         <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-          Provider Comparison
+          Discovery Comparison
         </h3>
       </div>
+      <p className="px-4 py-2 text-xs text-text-muted">Reference-deviation score based on market data and activity estimates. Lower is closer to the reference, not necessarily cheaper. Only a fresh wallet quote can authorize execution.</p>
       <DataTable
         columns={columns}
         data={costs}

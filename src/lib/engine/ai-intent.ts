@@ -13,7 +13,7 @@ Return ONLY valid JSON with these fields:
 Rules:
 - Default action is "buy" unless the user says sell/dump/exit/close/liquidate
 - Default unit is "usd" unless the user explicitly says shares/share
-- If no amount is specified, default to 500
+- If no amount is specified, return null; never invent a spending amount
 - Common stock name mappings: Apple=AAPL, Google/Alphabet=GOOGL, Amazon=AMZN, Microsoft=MSFT, Tesla=TSLA, Nvidia=NVDA, Meta/Facebook=META, Netflix=NFLX, Coinbase=COIN, MicroStrategy=MSTR
 - If the user mentions "k" after a number, multiply by 1000 (e.g. "2k" = 2000)
 - Strip any non-trade content — focus only on the trading intent
@@ -44,6 +44,7 @@ export async function parseIntentWithAI(raw: string): Promise<AIParseResult> {
   try {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
+      signal: AbortSignal.timeout(10000),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",

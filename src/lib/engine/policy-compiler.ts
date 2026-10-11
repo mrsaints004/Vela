@@ -5,7 +5,7 @@
  * Also provides factory functions for preset policies.
  */
 
-import type { ExecutionPolicy, PolicyPreset, POLICY_PRESETS } from "../types";
+import type { ExecutionPolicy, PolicyPreset } from "../types";
 import { POLICY_PRESETS as PRESETS } from "../types";
 
 /**
@@ -193,6 +193,12 @@ export function compilePolicyFromIntent(
  */
 export function validatePolicy(policy: ExecutionPolicy): string[] {
   const errors: string[] = [];
+  for (const field of ["maxDeviation", "maxSlippage", "maxTradeSize", "dailyLimit", "maxConcentration"] as const) {
+    if (!Number.isFinite(policy[field])) errors.push(`${field} must be finite`);
+  }
+  if (!Array.isArray(policy.allowedAssets) || policy.allowedAssets.some(a=>typeof a!=="string"||!/^[A-Z0-9.-]{1,15}$/.test(a))) errors.push("Allowed assets must be ticker strings");
+  if(typeof policy.blockAfterHours!=="boolean") errors.push("Market-hours preference must be boolean");
+  if (policy.expiresAt && !Number.isFinite(Date.parse(policy.expiresAt))) errors.push("Invalid policy expiry");
 
   if (policy.maxDeviation <= 0 || policy.maxDeviation > 50) {
     errors.push("Max deviation must be between 0 and 50%");
@@ -203,9 +209,7 @@ export function validatePolicy(policy: ExecutionPolicy): string[] {
   if (policy.maxTradeSize <= 0) {
     errors.push("Max trade size must be positive");
   }
-  if (policy.dailyLimit < policy.maxTradeSize) {
-    errors.push("Daily limit should be >= max trade size");
-  }
+
   if (policy.maxConcentration <= 0 || policy.maxConcentration > 100) {
     errors.push("Max concentration must be between 0 and 100%");
   }

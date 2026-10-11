@@ -1,9 +1,12 @@
 "use client";
 
+import {agenticRequest} from '@/lib/api/agentic-wallet';
+import {useState} from "react";
+import {useReceiptsStore} from "@/lib/stores/receipts";
 import type { DecisionReceipt, VelaReceipt } from "@/lib/types";
 import { NumberDisplay } from "@/components/shared/NumberDisplay";
 import { StatusDot } from "@/components/shared/StatusDot";
-import { X, Zap, Shield, ShieldOff, ExternalLink, Bot, Type } from "lucide-react";
+import { X, Shield, ShieldOff, ExternalLink, Bot, Type } from "lucide-react";
 
 interface ReceiptDetailProps {
   receipt: DecisionReceipt | VelaReceipt;
@@ -30,18 +33,15 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
           <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wider">
             Decision Receipt
           </h3>
-          {receipt.executionMode === "autonomous" && (
-            <span className="flex items-center gap-1 text-[10px] text-accent bg-accent/10 px-1.5 py-0.5 rounded">
-              <Zap className="w-2.5 h-2.5" /> Auto
-            </span>
-          )}
+
         </div>
-        <button onClick={onClose} className="text-text-muted hover:text-text-secondary">
+        <button aria-label="Close receipt" onClick={onClose} className="text-text-muted hover:text-text-secondary">
           <X className="w-4 h-4" />
         </button>
       </div>
 
       <div className="p-4 space-y-4 text-sm max-h-[70vh] overflow-y-auto">
+        <ReceiptEvidence receipt={receipt} />
         {/* REQUEST */}
         <Section title="Request">
           <Row label="Intent" value={receipt.intent.raw} mono />
@@ -52,7 +52,7 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
             value={
               receipt.intent.unit === "usd"
                 ? `$${receipt.intent.amount.toLocaleString()}`
-                : `${receipt.intent.amount} shares`
+                : receipt.intent.sellAll ? 'All tokens of selected issuer (exact quantity in quote)' : `${receipt.intent.amount} ${receipt.intent.unit==='tokens'?'tokens':'shares'}`
             }
             mono
           />
@@ -64,12 +64,12 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
             <Row label="Max Deviation" value={`${receipt.policySnapshot.maxDeviation}%`} mono />
             <Row label="Max Slippage" value={`${receipt.policySnapshot.maxSlippage}%`} mono />
             <Row label="Max Trade" value={`$${receipt.policySnapshot.maxTradeSize.toLocaleString()}`} mono />
-            <Row label="Daily Limit" value={`$${receipt.policySnapshot.dailyLimit.toLocaleString()}`} mono />
-            <Row label="Max Concentration" value={`${receipt.policySnapshot.maxConcentration}%`} mono />
-            <Row label="Min Liquidity" value={receipt.policySnapshot.minLiquidity} />
+            <Row label="Daily limit" value={receipt.signer==='binance-agentic-wallet'?'Binance wallet + Developer Mode quotas checked':'Not enforced'} />
+            <Row label="Concentration" value="Not enforced" />
+            <Row label="Liquidity depth" value="Not measured; executable quote used" />
           </div>
           <div className="flex items-center gap-3 mt-1.5 text-xs text-text-muted">
-            <span>{receipt.policySnapshot.autonomousExecution ? "Auto-execute: ON" : "Auto-execute: OFF"}</span>
+            <span>Signing: {receipt.signer==='binance-agentic-wallet'?'Binance MPC wallet · explicit confirmation':'manual browser-wallet approval'}</span>
             <span>{receipt.policySnapshot.blockAfterHours ? "After-hours: BLOCKED" : "After-hours: ALLOWED"}</span>
           </div>
           {receipt.policySnapshot.allowedAssets.length > 0 && (
@@ -107,7 +107,7 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
                     ${rep.impliedSharePrice.toFixed(2)}
                   </div>
                   <div className="text-[10px] text-text-muted">
-                    {rep.liquidityRating} · ${rep.effectiveCost.toFixed(2)} cost
+                    {rep.liquidityRating} · ${rep.effectiveCost.toFixed(2)} risk score
                   </div>
                 </div>
               </div>
@@ -152,9 +152,7 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
             }`}>
               {receipt.policyEvaluation.action.toUpperCase()}
             </span>
-            {receipt.policyEvaluation.canExecuteAutonomously && (
-              <span className="text-[10px] text-accent ml-1">· autonomous</span>
-            )}
+
           </div>
           <div className="space-y-1">
             {receipt.policyEvaluation.checks.map((c, i) => (
@@ -177,7 +175,7 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
 
         {/* SIMULATION */}
         {receipt.simulation && (
-          <Section title="Simulation">
+          <Section title={receipt.simulation.scope==='rfq-order'?'RFQ preflight (not settlement simulation)':'Transaction simulation'}>
             <div className="flex items-center gap-2">
               <StatusDot status={receipt.simulation.status === "SUCCESS" ? "active" : "fail"} />
               <span className={receipt.simulation.status === "SUCCESS" ? "text-gain" : "text-loss"}>
@@ -193,10 +191,10 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
         {/* QUOTE */}
         {receipt.quote && (
           <Section title="Quote">
-            <Row label="Expected Price" mono>
+            <Row label={receipt.intent.action==='sell'?'Quoted proceeds per share':'Expected Price'} mono>
               <NumberDisplay value={receipt.quote.expectedPrice} format="currency" />
             </Row>
-            <Row label="Output" mono>
+            <Row label={receipt.intent.action==='sell'?'Expected USDT proceeds':'Output'} mono>
               <NumberDisplay value={receipt.quote.toAmount} format="decimal" decimals={6} />
             </Row>
             <Row label="Price Impact" mono>
@@ -210,15 +208,14 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
         <Section title="Execution">
           <Row label="Mode">
             <span className="flex items-center gap-1 text-xs">
-              {receipt.executionMode === "autonomous" && <Zap className="w-3 h-3 text-accent" />}
-              {receipt.executionMode}
+              {receipt.digest?receipt.executionMode:'Legacy record — unverified'}
             </span>
           </Row>
           {receipt.execution && (
             <>
               <Row label="Status">
                 <StatusDot status={receipt.execution.status === "confirmed" ? "active" : "fail"} />
-                <span className="ml-1.5">{receipt.execution.status}</span>
+                <span className="ml-1.5">{receipt.digest?receipt.execution.status:'Unverified legacy status'}</span>
               </Row>
               {receipt.execution.txHash && (
                 <Row label="TX Hash">
@@ -236,7 +233,7 @@ function DecisionReceiptView({ receipt, onClose }: { receipt: DecisionReceipt; o
             </>
           )}
           {receipt.expectedSlippage != null && (
-            <Row label="Expected Slippage" mono>
+            <Row label="Quoted impact" mono>
               <NumberDisplay value={receipt.expectedSlippage} format="percent" colored />
             </Row>
           )}
@@ -306,7 +303,7 @@ function LegacyReceiptView({ receipt, onClose }: { receipt: VelaReceipt; onClose
           <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wider">Receipt</h3>
           <span className="text-xs text-text-muted font-mono">{receipt.id}</span>
         </div>
-        <button onClick={onClose} className="text-text-muted hover:text-text-secondary">
+        <button aria-label="Close receipt" onClick={onClose} className="text-text-muted hover:text-text-secondary">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -372,4 +369,36 @@ function Row({
       )}
     </div>
   );
+}
+
+function ReceiptEvidence({receipt}:{receipt:DecisionReceipt}) {
+  const [status,setStatus]=useState('');const [busy,setBusy]=useState(false);
+  const add=useReceiptsStore(s=>s.addReceipt);
+  async function verify() {setBusy(true);try{const res=await fetch(`/api/receipts?id=${encodeURIComponent(receipt.id)}&verify=true`);const data=await res.json();if(!res.ok)throw new Error(data.error);setStatus(!data.integrity?'Receipt checksum mismatch.':data.chainEvidence?'Checksum matches. BSC transfers independently verified.':data.verificationError||'Checksum matches. This receipt has no confirmed settlement to verify.');}catch(e){setStatus(e instanceof Error?e.message:'Verification failed.');}finally{setBusy(false);}}
+  async function recheck() {setBusy(true);try{
+    let data:{status:string;receipt?:DecisionReceipt;message?:string};
+    if(receipt.signer==='binance-agentic-wallet'){
+      const op=receipt.agenticEvidence?.operations.at(-1);
+      if(!receipt.execution?.txHash&&!receipt.execution?.orderId&&op){
+        data=await agenticRequest({action:'operation-status',previewId:receipt.previewId,operationId:op.id});
+        if(data.status==='submitted')data=await agenticRequest({action:'settlement',previewId:receipt.previewId});
+      }else data=await agenticRequest({action:'settlement',previewId:receipt.previewId});
+    }else {const res=await fetch('/api/trade',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'settlement',previewId:receipt.previewId,txHash:receipt.execution?.txHash})});data=await res.json();if(!res.ok)throw new Error((data as {error?:string}).error||'Recheck failed.');}
+    if(data.receipt){add(data.receipt);setStatus(data.message||`Settlement ${data.status}. Reopen this receipt to see the updated record.`);}else setStatus('Settlement is still pending.');
+  }catch(e){setStatus(e instanceof Error?e.message:'Recheck failed.');}finally{setBusy(false);}}
+
+  return <section className="border border-border rounded-lg p-3 space-y-2">
+    <h4 className="text-sm font-medium">Evidence · {receipt.outcome||'Legacy record — unverified'}</h4>
+    {receipt.failureReason&&<p className="text-loss text-xs">{receipt.failureReason}</p>}
+    <p className="text-xs text-text-muted">A checksum detects changes to this record. It does not prove historical decisions. Confirmed trades can be verified independently against BSC token transfers.</p>
+    {receipt.digest&&<code className="block text-[10px] break-all">SHA-256: {receipt.digest}</code>}
+    {receipt.agenticEvidence&&<details className="text-xs"><summary className="min-h-11 flex items-center cursor-pointer">Binance Agentic Wallet signing evidence</summary><pre className="overflow-auto max-h-64 bg-surface-2 p-3 rounded-lg">{JSON.stringify(receipt.agenticEvidence,null,2)}</pre></details>}
+    <p className="text-xs">{receipt.intent.action==='sell'?'Actual USDT received':'Actual stock tokens received'}: {receipt.execution?.actualOutput||'Not confirmed'} · {receipt.intent.action==='sell'?'Actual stock tokens spent':'Actual USDT spent'}: {receipt.execution?.actualInput||'Not confirmed'}</p>
+    <div className="flex flex-wrap gap-2">
+      {receipt.digest&&<button disabled={busy} onClick={verify} className="border border-border rounded-lg px-3 min-h-11">Verify receipt & BSC evidence</button>}
+      {receipt.previewId&&receipt.outcome==='pending'&&receipt.execution?.status==='pending'&&<button disabled={busy} onClick={recheck} className="border border-border rounded-lg px-3 min-h-11">Recheck settlement</button>}
+      <button onClick={()=>{const blob=new Blob([JSON.stringify(receipt,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download=`${receipt.id}.json`;link.click();URL.revokeObjectURL(url);}} className="border border-border rounded-lg px-3 min-h-11">Download JSON</button>
+    </div>
+    {status&&<p role="status" className="text-xs">{status}</p>}
+  </section>;
 }
