@@ -48,11 +48,11 @@ export const useTradeStore=create<TradeState>((set,get)=>({
     try {
       if(state.executionMode==='agentic'){
         const data=await agenticRequest<{previewId:string;quote:QuoteSnapshot|null;simulation:SimulationSnapshot|null;policyEvaluation:PolicyEvaluation;receipt:DecisionReceipt}>({action:'prepare',ticker:state.intent.ticker,intentAction:state.intent.action,unit:state.intent.unit,sellAll:state.intent.sellAll,raw:state.intent.raw,amount:String(state.intent.amount),tokenAddress:state.selectedTokenAddress,policy:state.policy});
-        if(version!==revision)return;save(data.receipt);set({...data,step:'awaiting-approval',error:data.receipt.failureReason||null});return;
+        if(version!==revision)return;save(data.receipt);set({...data,executionMode:state.executionMode,step:'awaiting-approval',error:data.receipt.failureReason||null});return;
       }
       const {address}=await walletSigner();if(get().intent!==state.intent||get().selectedTokenAddress!==state.selectedTokenAddress)return;version=++revision;set({step:'quoting'});
       const data=await api<{previewId:string;quote:QuoteSnapshot|null;simulation:SimulationSnapshot|null;policyEvaluation:PolicyEvaluation;receipt:DecisionReceipt}>({action:'full-flow',ticker:state.intent.ticker,intentAction:state.intent.action,unit:state.intent.unit,sellAll:state.intent.sellAll,raw:state.intent.raw,amount:String(state.intent.amount),tokenAddress:state.selectedTokenAddress,walletAddress:address,policy:state.policy});
-      if(version!==revision)return;save(data.receipt);set({...data,step:'awaiting-approval',error:data.receipt.failureReason||null});
+      if(version!==revision)return;save(data.receipt);set({...data,executionMode:state.executionMode,step:'awaiting-approval',error:data.receipt.failureReason||null});
     }catch(e){if(version===revision)set({step:get().representations.length?'comparing':'error',error:walletError(e)});}
   },
   approve:async()=>{
@@ -72,7 +72,7 @@ export const useTradeStore=create<TradeState>((set,get)=>({
   },setExecutionMode:(executionMode)=>{if(executing)return;revision++;set({executionMode,quote:null,simulation:null,previewId:null,policyEvaluation:null,receipt:null,agenticSigningPreview:null,agenticOperationId:null,step:get().representations.length?'comparing':'idle',error:null});},
   execute:async()=>{
     if(executing)return;const s=get();
-    if(!s.previewId||!s.quote||!s.intent||s.policyEvaluation?.action==='block'||s.simulation?.status!=='SUCCESS'){set({error:'No valid execution preview. Refresh the quote and preflight first.'});return;}
+    if(!s.previewId||!s.quote||!s.intent||((s.policyEvaluation?.action==='block'||s.simulation?.status!=='SUCCESS')&&!(s.executionMode==='agentic'&&allowanceOnlyBlocked(s.policyEvaluation,s.simulation)))){set({error:'No valid execution preview. Refresh the quote and preflight first.'});return;}
     if(s.executionMode==='agentic'){
       executing=true;set({step:'executing',error:null});
       try {
@@ -80,7 +80,7 @@ export const useTradeStore=create<TradeState>((set,get)=>({
         const operation=s.agenticSigningPreview.id;set({agenticOperationId:operation});
         let result=await agenticRequest<{status:string;receipt:DecisionReceipt;message?:string}>({action:'execute',previewId:s.previewId,operationId:operation,confirmed:true});
         for(let attempt=0;attempt<40;attempt++){save(result.receipt);set({receipt:result.receipt,execution:result.receipt.execution});
-          if(result.status==='approval-confirmed'){set({step:'comparing',quote:null,simulation:null,previewId:null,agenticSigningPreview:null,error:result.message||'Approval confirmed. Get a fresh quote.'});return;}
+          if(result.status==='approval-confirmed'){set({step:'comparing',quote:null,simulation:null,policyEvaluation:null,receipt:null,execution:null,previewId:null,agenticSigningPreview:null,agenticOperationId:null,error:result.message||'Approval confirmed. Get a fresh quote.'});return;}
           if(result.status==='confirmed'){set({step:'receipt',error:null});return;}
           if(result.status==='failed'){set({step:'receipt',error:result.message||result.receipt.failureReason||'Binance signing failed.'});return;}
           if(result.status==='submitted')break;
@@ -110,12 +110,12 @@ export const useTradeStore=create<TradeState>((set,get)=>({
           validateApproval(resetTx,'0',p.spender,inputToken);
           const latest=await walletSigner();if(latest.address.toLowerCase()!==address.toLowerCase())throw new Error('Wallet account changed.');
           const sent=await latest.signer.sendTransaction(resetTx);const confirmed=await sent.wait();if(confirmed?.status!==1)throw new Error('Allowance reset did not confirm.');
-          set({step:'comparing',quote:null,simulation:null,previewId:null,error:'Existing allowance reset to zero. Get a fresh preview for the exact token approval.'});return;
+          set({step:'comparing',quote:null,simulation:null,policyEvaluation:null,receipt:null,execution:null,previewId:null,error:'Existing allowance reset to zero. Get a fresh preview for the exact token approval.'});return;
         }
         const approval=await api<{txs:EvmTx[]}>({action:'approval',previewId:s.previewId});
         for(const tx of approval.txs){validateApproval(tx,input.toString(),p.spender,inputToken);const latest=await walletSigner();if(latest.address.toLowerCase()!==address.toLowerCase())throw new Error('Wallet account changed.');const sent=await latest.signer.sendTransaction(tx);const result=await sent.wait();if(result?.status!==1)throw new Error('Approval did not confirm.');}
         // Approval confirmation may consume quote TTL. Never sign the old order afterward.
-        set({step:'comparing',quote:null,simulation:null,previewId:null,error:'Token approval confirmed. Get a fresh preview, then review and sign the stock order.'});return;
+        set({step:'comparing',quote:null,simulation:null,policyEvaluation:null,receipt:null,execution:null,previewId:null,error:'Token approval confirmed. Get a fresh preview, then review and sign the stock order.'});return;
       }
       if(Date.now()>=p.expiresAt)throw new Error('Quote expired. Refresh before signing.');
       const current=await walletSigner();if(current.address.toLowerCase()!==address.toLowerCase())throw new Error('Wallet account changed.');

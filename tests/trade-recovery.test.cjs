@@ -24,9 +24,10 @@ test('failed quote preserves discovery and can retry without re-entering the int
     assert.equal(useTradeStore.getState().previewId,null);
     assert.equal(saved.length,0);
     const receipt={id:'refused-test-receipt',outcome:'refused',execution:null,failureReason:'Policy refusal'};
-    global.fetch=async()=>new Response(JSON.stringify({previewId:'test-preview',quote:null,simulation:{status:'FAILED'},policyEvaluation:{action:'block'},receipt}),{status:200});
+    global.fetch=async()=>new Response(JSON.stringify({executionMode:'EVM',previewId:'test-preview',quote:null,simulation:{status:'FAILED'},policyEvaluation:{action:'block'},receipt}),{status:200});
     await useTradeStore.getState().fetchQuoteAndSimulate();
     assert.equal(useTradeStore.getState().step,'awaiting-approval');
+    assert.equal(useTradeStore.getState().executionMode,'wallet');
     assert.equal(saved[0].outcome,'refused');
     assert.equal(useTradeStore.getState().quote,null);
   } finally {global.fetch=originalFetch;browser.walletSigner=originalSigner;useReceiptsStore.setState({addReceipt:originalSave});useTradeStore.getState().reset();}
@@ -48,4 +49,13 @@ test('a delayed quote cannot replace state after the execution account changes',
     assert.equal(useTradeStore.getState().previewId,null);
     assert.equal(useTradeStore.getState().step,'comparing');
   } finally {global.fetch=originalFetch;browser.walletSigner=originalSigner;useTradeStore.getState().reset();}
+});
+test('editing a request clears executable state while preserving the selected wallet and policy',()=>{
+ discover();useTradeStore.getState().setExecutionMode('agentic');const policy=useTradeStore.getState().policy;
+ useTradeStore.setState({previewId:'old-five-dollar-preview',quote:{fromAmount:5},agenticSigningPreview:{id:'old-signing-preview'}});
+ useTradeStore.getState().reset();const state=useTradeStore.getState();assert.equal(state.intent,null);assert.equal(state.previewId,null);assert.equal(state.quote,null);assert.equal(state.agenticSigningPreview,null);assert.equal(state.executionMode,'agentic');assert.equal(state.policy,policy);
+});
+test('a five dollar thirty cent request retains its exact decimal amount',()=>{
+ const {parseIntent,validateIntent}=require('../src/lib/engine/intent.ts'),{amountUnits}=require('../src/lib/engine/order.ts');
+ const intent=parseIntent('Buy $5.30 of NVDA');validateIntent(intent);assert.equal(intent.amount,5.3);assert.equal(amountUnits(String(intent.amount)),'5300000000000000000');
 });

@@ -9,6 +9,8 @@ import {USDT_BSC,amountUnits,validateApproval,validateTypedOrder,type EvmTx} fro
 import type {ExecutionPolicy,TradeIntent,DecisionReceipt} from '../types';
 import type {AgenticSigningPreview,AgenticPairing} from '../types/agentic';
 import {validateIntent,MIN_PURCHASE_USD} from '../engine/intent';
+import {allowanceOnlyBlocked} from '../engine/approval-readiness';
+import {validatePolicy} from '../engine/policy-compiler';
 import {parseBinancePairing} from './agentic-pairing';
 interface Operation {id:string;previewId:string;requestId:string;wallet:string;kind:'contract-call'|'sign-message';view:AgenticSigningPreview;tx?:EvmTx;attempted:boolean;orderId?:string;result?:Record<string,unknown>}
 interface LoginJob {view:AgenticPairing;abort:AbortController;}
@@ -44,7 +46,15 @@ export async function prepareAgentic(intent:TradeIntent,token:string,policy:Exec
   p.receipt=await persistReceipt(p.receipt);await saveRecord('previews',p.id,p);
   return {...result,policyEvaluation:p.receipt.policyEvaluation,receipt:p.receipt};
 }
-async function loadAgentic(id:string,fresh=true) {const p=await getPreview(id,fresh);if(p.signer!=='binance-agentic-wallet')throw new Error('This preview belongs to the browser-wallet flow.');return p;}
+async function loadAgentic(id:string,fresh=true,approvalOnly=false) {
+  let p:Preview;
+  try{p=await getPreview(id,fresh);}catch(error){
+    if(!approvalOnly)throw error;
+    p=await readRecord<Preview>('previews',id);
+    if(!allowanceOnlyBlocked(p.receipt.policyEvaluation,p.receipt.simulation)||!p.quote||!p.swap||!p.pair||p.submitted||p.orderId||validatePolicy(p.policy).length||(fresh&&Date.now()>=p.expiresAt))throw error;
+  }
+  if(p.signer!=='binance-agentic-wallet')throw new Error('This preview belongs to the browser-wallet flow.');return p;
+}
 async function writeEvidence(p:Preview,operation:Operation,status:string) {
   const evidence=p.receipt.agenticEvidence;if(evidence){evidence.operations=evidence.operations.filter(o=>o.id!==operation.id);evidence.operations.push({id:operation.id,operation:operation.view.operation,status,requestId:operation.requestId,orderId:operation.orderId,expiresAt:operation.view.expiresAt,requireConfirmation:operation.view.requireConfirmation,parsed:operation.view.parsed,risks:operation.view.risks,authorityChanges:operation.view.authorityChanges});}
   p.receipt=await persistReceipt(p.receipt);await saveRecord('previews',p.id,p);
@@ -62,6 +72,8 @@ async function buildSigningPreview(p:Preview) {
     if(allowance>0n)tx={to:p.pair?.inputToken||USDT_BSC,value:'0',data:approvalAbi.encodeFunctionData('approve',[p.spender,0])};
     else {const built=await approvals(p);if(built.txs.length!==1)throw new Error('Multiple approval transactions require separate reviewed previews.');tx=built.txs[0];validateApproval(tx,p.pair?.rawInput||amountUnits(p.amount),p.spender,p.pair?.inputToken||USDT_BSC);}
     kind='contract-call';operation='approval';args=['contract-call','preview','--binanceChainId','56','--from',p.wallet,'--to',tx.to,'--value',tx.value,'--inputData',tx.data];
+  } else if(allowanceOnlyBlocked(p.receipt.policyEvaluation,p.receipt.simulation)) {
+    throw new Error('Allowance is now sufficient. Obtain a fresh quote and successful swap simulation before trading.');
   } else if(p.swap!.rfq) {
     const order=p.swap!.rfq.typedData;validateTypedOrder(order,p.wallet,p.token,p.amount,p.quote!.rawOutput!,p.policy.maxSlippage,p.pair);
     const typed=TypedDataEncoder.getPayload(order.domain,order.types,order.message);
@@ -81,7 +93,7 @@ async function buildSigningPreview(p:Preview) {
 }
 export class AgenticRefusalError extends Error {constructor(message:string,public receipt:DecisionReceipt){super(message);}}
 export async function previewAgentic(id:string) {
-  const p=await loadAgentic(id);
+  const p=await loadAgentic(id,true,true);
   try{return await buildSigningPreview(p);}catch(e){
     const reason=e instanceof Error?e.message:'Binance signing preview failed.';
     p.receipt.outcome='refused';p.receipt.failureReason=reason;p.receipt.execution=null;p.receipt.executionMode='blocked';
@@ -94,7 +106,7 @@ export async function executeAgentic(id:string,operationId:string,confirmed:bool
   if(confirmed!==true)throw new Error('Explicit confirmation of the displayed Binance signing preview is required.');
   const op=await readRecord<Operation>('previews',operationId);if(op.previewId!==id)throw new Error('Signing preview does not match this trade.');
   if(op.attempted)return checkAgenticOperation(id,operationId);
-  const p=await loadAgentic(id,op.view.operation!=='approval');
+  const p=await loadAgentic(id,op.view.operation!=='approval',op.view.operation==='approval');
   if(Date.now()>=op.view.expiresAt)throw new Error('Binance signing preview expired. Request a new preview.');
   const status=await walletStatus();assertAgenticReady(status,p.notionalUsd??Number(p.amount),p.wallet);
   if(Date.now()>=op.view.expiresAt)throw new Error('Binance signing preview expired during permission checks. Refresh before signing.');
@@ -126,7 +138,7 @@ async function consumeResult(p:Preview,op:Operation):Promise<{status:string;rece
 }
 export async function checkAgenticOperation(id:string,operationId:string) {
   const op=await readRecord<Operation>('previews',operationId);if(op.previewId!==id||!op.attempted)throw new Error('No matching executed signing request.');
-  const p=await loadAgentic(id,false);if(p.receipt.outcome==='confirmed'||p.receipt.outcome==='failed')return {status:p.receipt.outcome,receipt:p.receipt,message:p.receipt.failureReason};
+  const p=await loadAgentic(id,false,op.view.operation==='approval');if(p.receipt.outcome==='confirmed'||p.receipt.outcome==='failed')return {status:p.receipt.outcome,receipt:p.receipt,message:p.receipt.failureReason};
   if(p.submitted)return settleAgentic(id);
   const current=await walletStatus();if(current.address?.toLowerCase()!==p.wallet.toLowerCase())throw new Error('Sign in to the original Agentic Wallet to recover this operation.');
   if(!op.result)throw new Error('Execution outcome is unknown. Inspect Binance App and wallet history before retrying; Vela will not execute this request twice.');

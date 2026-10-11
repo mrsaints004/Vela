@@ -5,6 +5,10 @@ import {NumberDisplay} from '@/components/shared/NumberDisplay';
 import {ExternalLink,Wallet} from 'lucide-react';
 export function AgenticWalletPanel(){
   const {status,pairing,busy,error,refresh,signIn,pollPairing,signOut}=useAgenticWalletStore();
+  const dev=status?.settings?.devMode;
+  const devExpiry=dev?.expiresAt;
+  const validDevExpiry=typeof devExpiry==='number'&&Number.isFinite(devExpiry)&&devExpiry>0;
+  const devLabel=!dev?.enabled?'Disabled — enable in Binance App':!validDevExpiry?'Enabled — expiry unavailable; signing blocked':dev?.expired?'Expired — renew in Binance App':'Enabled';
   useEffect(()=>{void refresh();},[refresh]);
   useEffect(()=>{if(pairing?.status!=='waiting')return;const timer=setInterval(()=>void pollPairing(),3000);return()=>clearInterval(timer);},[pairing?.status,pollPairing]);
   return <section className="border border-border bg-surface-1 rounded-xl p-4 space-y-3">
@@ -15,7 +19,8 @@ export function AgenticWalletPanel(){
     {status?.settings&&<dl className="text-xs space-y-2">
       <div className="flex justify-between gap-2"><dt>Wallet daily quota left</dt><dd><NumberDisplay value={status.settings.quotaLeft} format="currency"/></dd></div>
       <div className="flex justify-between gap-2"><dt>Developer Mode quota left</dt><dd><NumberDisplay value={status.settings.devMode.dailyLimit-status.settings.developerModeQuotaUsed} format="currency"/></dd></div>
-      <div className="flex justify-between gap-2"><dt>Developer Mode</dt><dd>{status.settings.devMode.enabled?'Enabled':'Disabled — enable in Binance App'}</dd></div>
+      <div className="flex justify-between gap-2"><dt>Developer Mode</dt><dd className="text-right">{devLabel}</dd></div>
+      <div><dt className="text-text-secondary">Developer Mode expires</dt><dd>{validDevExpiry?new Date(devExpiry*1000).toLocaleString():'Unavailable'}</dd></div>
       <div className="flex justify-between gap-2"><dt>Wallet lock</dt><dd>{status.lock||'Unavailable'}</dd></div>
       <div><dt className="text-text-secondary">Session expires</dt><dd>{status.settings.sessionExpireTime?new Date(status.settings.sessionExpireTime).toLocaleString():'Unavailable'}</dd></div>
     </dl>}

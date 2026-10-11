@@ -15,6 +15,14 @@ Vela helps you buy and sell tokenized stocks on BNB Smart Chain. It discovers re
 
 Trading uses **BSC mainnet, chain 56**. ERC-8004 identity registration has a separate network selection; registering an identity does not authorize trades or deploy a runtime.
 
+## Mainnet demonstration
+
+The recorded demo includes a $5.30 NVDA purchase using Binance Agentic Wallet on BSC mainnet. The recorder verified its funded settlement against the decision receipt and matching on-chain token transfers.
+
+[View the settlement transaction on BscScan](https://bscscan.com/tx/0xaca1fc2c13170efa9ffa68cbe02bd499c35b429ee139d63087f50950494db57b)
+
+This demonstrates the purchase flow; a completed buy-and-sell round trip is not claimed.
+
 ## Run locally
 
 Requires Node.js 20.9 or later and npm.

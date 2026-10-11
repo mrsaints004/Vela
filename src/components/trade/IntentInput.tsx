@@ -24,6 +24,7 @@ const PRESET_META: Record<Exclude<PolicyPreset, "custom">, { label: string; icon
 
 interface IntentInputProps {
   onSubmit: (intent: string) => void;
+  onEdit?: () => void;
   disabled?: boolean;
   initialTicker?: string | null;
   initialIntent?: string | null;
@@ -33,7 +34,7 @@ interface IntentInputProps {
 }
 
 export function IntentInput({
-  onSubmit, disabled, initialTicker, initialIntent,
+  onSubmit, onEdit, disabled, initialTicker, initialIntent,
   policy, onPolicyPreset, onPolicyFieldChange,
 }: IntentInputProps) {
   const [value, setValue] = useState(initialIntent || (initialTicker ? `Buy $5 of ${initialTicker}` : ""));
@@ -79,7 +80,7 @@ export function IntentInput({
             ref={inputRef}
             type="text"
             value={value}
-            onChange={(e) => { setValue(e.target.value); setShowSuggestions(true); }}
+            onChange={(e) => { setValue(e.target.value); setShowSuggestions(true); onEdit?.(); }}
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
             placeholder='Buy $5 of NVDA, Sell all NVDA, or Sell 0.01 tokens of NVDA'

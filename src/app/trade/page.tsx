@@ -1,5 +1,6 @@
 "use client";
 
+import {allowanceOnlyBlocked} from '@/lib/engine/approval-readiness';
 import {AgenticWalletPanel} from '@/components/agent/AgenticWalletPanel';
 import {useAgenticWalletStore} from '@/lib/stores/agentic-wallet';
 import { Suspense, useEffect } from "react";
@@ -47,6 +48,10 @@ function TradePageInner() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticker, selling, saleToken]);
+
+  const approvalNotice=!!error&&/^(Approval confirmed|Token approval confirmed|Exact token approval confirmed|Allowance reset confirmed|Existing allowance reset)/.test(error);
+  const approvalRequired=allowanceOnlyBlocked(policyEvaluation,simulation);
+  const displayEvaluation=approvalRequired&&policyEvaluation?{...policyEvaluation,checks:policyEvaluation.checks.map(c=>c.name==='Preflight'?{...c,status:'warn' as const,threshold:'Approval required',message:'Approve the exact input-token amount, then refresh the quote to simulate the trade.'}:c),reasoning:'Token approval required. The stock trade remains blocked until approval confirms and a fresh simulation passes.'}:policyEvaluation;
 
   const isIdle = step === "idle";
   const isParsing = step === "parsing";
@@ -104,6 +109,7 @@ function TradePageInner() {
         <IntentInput
           key={initialIntent || "manual"}
           onSubmit={handleNewIntent}
+          onEdit={reset}
           disabled={inputDisabled}
           initialTicker={ticker}
           initialIntent={initialIntent}
@@ -114,12 +120,12 @@ function TradePageInner() {
       </div>
 
       {/* Error state */}
-      {error && (
+      {error && !approvalRequired && (
         <div className="border border-border rounded-xl px-4 py-3 flex items-start gap-3 mb-6">
-          <AlertCircle className="w-4 h-4 text-loss mt-0.5 shrink-0" />
+          {approvalNotice?<ShieldCheck className="w-4 h-4 text-gain mt-0.5 shrink-0" />:<AlertCircle className="w-4 h-4 text-loss mt-0.5 shrink-0" />}
           <div>
             <p className="text-sm text-text-primary">{error}</p>
-            <p className="text-xs text-text-muted mt-1">{hasResults ? 'Follow the message above, then refresh the quote. Never retry an order with an unknown settlement outcome.' : 'Edit your intent above and try again.'}</p>
+            <p className="text-xs text-text-muted mt-1">{approvalNotice?'Approval is separate from buying the stock. Get a fresh quote and review the next signing request.':hasResults ? 'Follow the message above, then refresh the quote. Never retry an order with an unknown settlement outcome.' : 'Edit your intent above and try again.'}</p>
           </div>
         </div>
       )}
@@ -253,7 +259,7 @@ function TradePageInner() {
               <RecommendationBar recommendation={recommendation} factors={factors} />
             )}
 
-            <RiskFlags policyEvaluation={policyEvaluation} />
+            <RiskFlags policyEvaluation={displayEvaluation} approvalRequired={approvalRequired} />
 
             <div className="bg-surface-1 border border-border rounded-xl p-3 text-xs text-text-secondary">
               {executionMode==='agentic'?'Execution uses your Binance MPC wallet on BSC mainnet. Review Binance signing risks and confirm; Binance App rules and Developer Mode apply.':'Execution uses your browser wallet on BSC mainnet. Vela does not hold your keys. Every approval and stock order needs your signature.'}

@@ -4,7 +4,7 @@ Updated 11 October 2026.
 
 Vela is a tokenized-stock execution interface for BSC mainnet. It discovers stock representations, obtains a wallet-specific quote, evaluates execution constraints, requests signing, and records the decision and settlement evidence. The integration uses Binance RWA and market data, Trading, Transaction and Wallet APIs, plus the official Binance Agentic Wallet CLI. ERC-8004 identity registration is a separate optional feature. Managed BNB Agent Studio deployment and x402 payments are outside the implemented scope.
 
-This report distinguishes problems observed in the application from behavior established by code and fixture tests. It does not claim a completed funded trade, a registered identity or measured platform performance without supporting records.
+This report distinguishes problems observed in the application from behavior established by code and fixture tests. The live recorder subsequently verified a funded $5.30 NVDA purchase on BSC mainnet. Identity registration, a completed sale and measured platform performance are not claimed without supporting records.
 
 ## Onboarding
 
@@ -88,7 +88,7 @@ A single documented example tracing quote, swap construction, order signature, s
 
 Initial setup surfaced “Invalid Binance pairing response” and subsequently a rejected sign-in link. The local adapter needed to handle the actual CLI response while preserving strict link validation. Supported login links are HTTPS on trusted Binance hosts; lookalike hosts and malformed links remain rejected.
 
-The current integration uses official `@binance/agentic-wallet@1.10.0`, installed locally, and the CLI's supported session-directory configuration. The pairing verifier remains active while the user completes Binance App confirmation. The connected wallet panel subsequently displayed a BSC address, unlocked state, session expiry and Developer Mode enabled.
+The current integration uses official `@binance/agentic-wallet@1.10.0`, installed locally, and the CLI's supported session-directory configuration. An expiry-format mismatch also blocked signing despite an enabled Developer Mode flag: the wallet-settings reference describes Unix seconds, but the installed CLI converts the expiry to a timezone-qualified date string. Vela now accepts both forms, normalizes them to seconds, and still refuses missing or expired permission. Developer Mode expiry is shown separately from login session expiry. The pairing verifier remains active while the user completes Binance App confirmation. The connected wallet panel subsequently displayed a BSC address, unlocked state, session expiry and Developer Mode enabled.
 
 The [Agentic Wallet documentation](https://developers.binance.com/en/docs/products/agentic-wallet/welcome) and its authentication/external-signing references would be easier to integrate with a versioned JSON schema for success, pending confirmation, rejection and expiry. Copyable response examples should include the exact sign-in URL and pairing-code fields.
 
@@ -142,7 +142,7 @@ The flight recorder keeps up to 500 API records in memory for the server process
 
 No retained benchmark dataset supports the earlier draft's precise latency figures, rate-limit claims or first-call timing. Those figures have been removed. The fixture tests exercise failure handling, order validation, approval boundaries, pairing and receipts; they do not demonstrate a funded mainnet round trip.
 
-The remaining experiential evidence is a wallet-approved purchase with its matching decision receipt and BscScan transaction, a separate sell verification if round-trip behavior is claimed, and saved API telemetry for any performance conclusions. Personal onboarding timing and documentation-page observations should come from the participant's own records.
+A wallet-approved $5.30 NVDA purchase now has a matching decision receipt and verified BSC settlement: [settlement transaction](https://bscscan.com/tx/0xaca1fc2c13170efa9ffa68cbe02bd499c35b429ee139d63087f50950494db57b). The live recorder retained this evidence with the actual app footage. A separate sell verification is still needed if round-trip behavior is claimed, as is saved API telemetry for performance conclusions. Personal onboarding timing and documentation-page observations should come from the participant's own records.
 
 ## Priority platform recommendations
 

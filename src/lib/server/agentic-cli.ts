@@ -40,7 +40,18 @@ export function parseSettings(raw:Record<string,unknown>):AgenticSettings {
   const finite=(key:string)=>{const value=Number(raw[key]);if(!Number.isFinite(value)||value<0)throw new Error(`Agentic Wallet ${key} is unavailable.`);return value;};
   const dev=object(raw.devMode||{});
   if(typeof dev.enabled!=='boolean')throw new Error('Agentic Wallet Developer Mode state is unavailable.');
-  return {dailyLimit:finite('dailyLimit'),quotaLeft:finite('quotaLeft'),quotaUsed:finite('quotaUsed'),quotaDate:textField(raw.quotaDate),tradeAllTokens:raw.tradeAllTokens===true,abnormalTxnHandling:textField(raw.abnormalTxnHandling),sessionExpireTime:textField(raw.sessionExpireTime),devMode:{enabled:dev.enabled,expiresAt:dev.expiresAt===null?null:Number(dev.expiresAt),dailyLimit:Number(dev.dailyLimit),balanceExceeded:dev.balanceExceeded===true},developerModeQuotaUsed:Number(raw.developerModeQuotaUsed)};
+  // The API documents Unix seconds; baw 1.10.0 serializes this field as a date string.
+  const expiresAt=parseDeveloperExpiry(dev.expiresAt);
+  return {dailyLimit:finite('dailyLimit'),quotaLeft:finite('quotaLeft'),quotaUsed:finite('quotaUsed'),quotaDate:textField(raw.quotaDate),tradeAllTokens:raw.tradeAllTokens===true,abnormalTxnHandling:textField(raw.abnormalTxnHandling),sessionExpireTime:textField(raw.sessionExpireTime),devMode:{enabled:dev.enabled,expired:expiresAt!==null&&expiresAt*1000<=Date.now(),expiresAt,dailyLimit:Number(dev.dailyLimit),balanceExceeded:dev.balanceExceeded===true},developerModeQuotaUsed:Number(raw.developerModeQuotaUsed)};
+}
+export function parseDeveloperExpiry(value:unknown):number|null {
+  if(typeof value==='number'||(typeof value==='string'&&/^\d+(?:\.\d+)?$/.test(value))){
+    const n=Number(value);if(!Number.isFinite(n)||n<=0)return null;
+    const seconds=n>=1e12?n/1000:n;
+    return Number.isFinite(new Date(seconds*1000).getTime())?seconds:null;
+  }
+  if(typeof value!=='string'||!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(value))return null;
+  const ms=Date.parse(value);return Number.isFinite(ms)&&ms>0?ms/1000:null;
 }
 export async function walletStatus():Promise<AgenticStatus> {
   const version=await checkCli();const status=await runBaw(['wallet','status']);
@@ -57,7 +68,9 @@ export function assertAgenticReady(status:AgenticStatus,amount:number,wallet?:st
   if(!allowLocked && status.lock!=='UNLOCKED')throw new Error('Agentic Wallet is locked. Resolve the pending transaction or confirmation in Binance App.');
   const s=status.settings,session=Date.parse(s.sessionExpireTime);
   if(!Number.isFinite(session)||session<=Date.now())throw new Error('Agentic Wallet session expired or cannot be verified. Sign in again.');
-  if(!s.devMode.enabled||!Number.isFinite(s.devMode.expiresAt)||Number(s.devMode.expiresAt)*1000<=Date.now())throw new Error('Enable unexpired Developer Mode in Binance App for Vela external signing.');
+  if(!s.devMode.enabled)throw new Error('Developer Mode is disabled in Binance App. Enable it, refresh wallet status, then obtain a new quote.');
+  if(!Number.isFinite(s.devMode.expiresAt)||Number(s.devMode.expiresAt)<=0)throw new Error('Binance reports Developer Mode enabled but did not provide a valid expiry. Renew Developer Mode in Binance App and refresh wallet status. Signing remains blocked.');
+  if(Number(s.devMode.expiresAt)*1000<=Date.now())throw new Error(`Developer Mode expired at ${new Date(Number(s.devMode.expiresAt)*1000).toISOString()}. This is separate from login session expiry. Renew it in Binance App, refresh wallet status, then obtain a new quote.`);
   if(!Number.isFinite(amount)||amount<=0||s.quotaLeft<amount)throw new Error('Trade exceeds the remaining Binance wallet daily quota.');
   if(!Number.isFinite(s.developerModeQuotaUsed)||!Number.isFinite(s.devMode.dailyLimit)||s.devMode.balanceExceeded||s.devMode.dailyLimit-s.developerModeQuotaUsed<amount)throw new Error('Developer Mode quota is unavailable or insufficient. Review Binance App settings.');
 }

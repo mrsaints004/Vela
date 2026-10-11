@@ -30,8 +30,11 @@ export interface AuthRWAToken {
 
 let cached: {tokens:AuthRWAToken[];time:number}|null=null;
 let pending:Promise<AuthRWAToken[]|null>|null=null;
-export async function fetchAuthenticatedTokens():Promise<AuthRWAToken[]|null> {
-  if(!process.env.BINANCE_WEB3_API_KEY||!process.env.BINANCE_WEB3_SECRET_KEY)return null;
+export async function fetchAuthenticatedTokens(required=false):Promise<AuthRWAToken[]|null> {
+  if(!process.env.BINANCE_WEB3_API_KEY||!process.env.BINANCE_WEB3_SECRET_KEY){
+    if(required)throw new Error('Authenticated stock data is unavailable: configure BINANCE_WEB3_API_KEY and BINANCE_WEB3_SECRET_KEY in equitytwin/.env.local, then restart the app server. Agentic Wallet sign-in does not configure API credentials.');
+    return null;
+  }
   if(cached&&Date.now()-cached.time<15000)return cached.tokens;
   if(pending)return pending;
   pending=(async()=>{
@@ -44,5 +47,5 @@ export async function fetchAuthenticatedTokens():Promise<AuthRWAToken[]|null> {
   })();
   return pending;
 }
-export async function findAuthenticatedRepresentations(ticker:string){const tokens=await fetchAuthenticatedTokens();return tokens?.filter(t=>t.underlyingTicker.toUpperCase()===ticker.toUpperCase()&&t.binanceChainId==='56')||[];}
+export async function findAuthenticatedRepresentations(ticker:string,required=false){const tokens=await fetchAuthenticatedTokens(required);return tokens?.filter(t=>t.underlyingTicker.toUpperCase()===ticker.toUpperCase()&&String(t.binanceChainId)==='56')||[];}
 export async function getReferencePrice(ticker:string){const tokens=await findAuthenticatedRepresentations(ticker);return tokens.map(t=>Number(t.referencePrice)).find(n=>Number.isFinite(n)&&n>0)??null;}

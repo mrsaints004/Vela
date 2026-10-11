@@ -37,3 +37,35 @@ test('MPC preview -> App confirmation -> real typed signature -> RFQ submit is d
     const refused=await another();badPreview=true;await assert.rejects(agentic.previewAgentic(refused.id),error=>error.receipt?.outcome==='refused');const refusal=await storage.readRecord('receipts',refused.receipt.id);assert.equal(refusal.policyEvaluation.action,'block');await assert.rejects(trades.getPreview(refused.id));assert.equal(submitCount,1);
   }finally{cli.runBaw=originals.run;cli.walletStatus=originals.status;chain.chainProvider=originals.provider;trading.submitOrder=originals.submit;trading.getOrder=originals.getOrder;chain.verifySettlement=originals.verify;delete process.env.VELA_DATA_DIR;await rm(root,{recursive:true,force:true});}
 });
+
+test('Developer Mode reports missing expiry and expired permission separately from login expiry',()=>{const good=ready();assert.throws(()=>cli.assertAgenticReady({...good,settings:{...good.settings,devMode:{...good.settings.devMode,expiresAt:null}}},5),/did not provide a valid expiry/);assert.throws(()=>cli.assertAgenticReady({...good,settings:{...good.settings,devMode:{...good.settings.devMode,expiresAt:1}}},5),/separate from login session expiry/);});
+test('official CLI formatted Developer Mode expiry normalizes without weakening expiry checks',()=>{
+ const good=ready(),seconds=Math.floor(Date.now()/1000)+3600;
+ for(const value of [seconds,String(seconds),seconds*1000,new Date(seconds*1000).toISOString(),new Date(seconds*1000).toISOString().replace('Z','+00:00')]){
+  const settings=cli.parseSettings({...good.settings,devMode:{...good.settings.devMode,expiresAt:value}});
+  assert.equal(settings.devMode.expiresAt,seconds);assert.equal(settings.devMode.expired,false);
+  cli.assertAgenticReady({...good,settings},5);
+ }
+ for(const value of [null,undefined,'','not-a-date','2026-10-13T10:00:00',0,-1])assert.equal(cli.parseDeveloperExpiry(value),null);
+ const settings=cli.parseSettings({...good.settings,devMode:{...good.settings.devMode,expiresAt:'2020-01-01T00:00:00+00:00'}});
+ assert.equal(settings.devMode.expired,true);assert.throws(()=>cli.assertAgenticReady({...good,settings},5),/Developer Mode expired/);
+});
+test('allowance-only MPC refusal permits an approval preview but never a stock swap',async()=>{
+ const agentic=require('../src/lib/server/agentic.ts'),storage=require('../src/lib/server/storage.ts'),chain=require('../src/lib/server/chain.ts'),trades=require('../src/lib/server/trades.ts');
+ const {createPolicyFromPreset}=require('../src/lib/engine/policy-compiler.ts'),{Interface}=require('ethers');
+ const root=await mkdtemp(join(tmpdir(),'vela-mpc-allowance-')),oldDir=process.env.VELA_DATA_DIR;
+ const originals={status:cli.walletStatus,run:cli.runBaw,provider:chain.chainProvider,approvals:trades.approvals};
+ const wallet=ready().address,id='allowance-'+randomUUID(),abi=new Interface(['function approve(address,uint256)']);let allowance=0n,cliCalls=0;
+ const p={id,wallet,token:stock,amount:'5.3',policy:createPolicyFromPreset('moderate'),spender,expiresAt:Date.now()+25000,signer:'binance-agentic-wallet',pair:{inputToken:USDT_BSC,outputToken:stock,rawInput:amountUnits('5.3')},quote:{rawOutput:'100'},swap:{executionMode:'EVM',to:spender,data:'0x1234',value:'0'},receipt:{id:id+'-receipt',outcome:'refused',intent:{action:'buy'},policyEvaluation:{action:'block',checks:[{name:'Preflight',status:'fail'}]},simulation:{status:'FAILED',scope:'transaction',failReason:'BEP20: transfer amount exceeds allowance'}}};
+ try{
+  process.env.VELA_DATA_DIR=root;await storage.saveRecord('previews',id,p);
+  cli.walletStatus=async()=>ready(wallet);
+  chain.chainProvider=()=>({send:async()=>'0x38',call:async tx=>'0x'+(tx.data.startsWith('0xdd62ed3e')?allowance:BigInt(amountUnits('6'))).toString(16).padStart(64,'0')});
+  trades.approvals=async()=>({txs:[{to:USDT_BSC,value:'0',data:abi.encodeFunctionData('approve',[spender,amountUnits('5.3')])}]});
+  cli.runBaw=async args=>{cliCalls++;assert.equal(args[0],'contract-call');assert.equal(args[1],'preview');return {requestId:'approval-request',expiresAt:Date.now()+300000,requireConfirmation:true,risks:{riskDetails:[],addresses:{}},parsedTx:{},simulationResult:{simulationCode:'000000000'}};};
+  const result=await agentic.previewAgentic(id);assert.equal(result.preview.operation,'approval');assert.equal(abi.decodeFunctionData('approve',result.preview.payload.data)[1],BigInt(amountUnits('5.3')));
+  await assert.rejects(trades.getPreview(id),/refused/);
+  allowance=BigInt(amountUnits('5.3'));await assert.rejects(agentic.previewAgentic(id),/fresh quote and successful swap simulation/);assert.equal(cliCalls,1);
+  p.receipt.policyEvaluation.checks.push({name:'Trade size',status:'fail'});await storage.saveRecord('previews',id,p);await assert.rejects(agentic.previewAgentic(id),/refused/);assert.equal(cliCalls,1);
+ }finally{Object.assign(cli,{walletStatus:originals.status,runBaw:originals.run});chain.chainProvider=originals.provider;trades.approvals=originals.approvals;if(oldDir===undefined)delete process.env.VELA_DATA_DIR;else process.env.VELA_DATA_DIR=oldDir;await rm(root,{recursive:true,force:true});}
+});

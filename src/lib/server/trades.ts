@@ -58,8 +58,9 @@ export async function prepare(intent: TradeIntent, wallet: string, tokenAddress:
   let quote: QuoteSnapshot|null=null, swap:SwapTx|null=null, simulation:SimulationSnapshot|null=null, problem='', spender='';
   let pair:TradePair|undefined,inputDecimals=18,inputAmount=String(intent.amount),notionalUsd=selling?NaN:intent.amount;
   try {
-    const metadata=(await findAuthenticatedRepresentations(intent.ticker)).find(t=>t.tokenContractAddress.toLowerCase()===tokenAddress.toLowerCase());
-    if(!metadata || !Number.isFinite(Number(metadata.tokenToShareRatio)) || Number(metadata.tokenToShareRatio)<=0 || typeof metadata.statusInfo.openState!=='boolean') throw new Error('Verified share ratio and reference-market state are unavailable for this stock.');
+    const metadata=(await findAuthenticatedRepresentations(intent.ticker,true)).find(t=>t.tokenContractAddress.toLowerCase()===tokenAddress.toLowerCase());
+    if(!metadata)throw new Error(`Binance authenticated RWA data did not include the selected ${selected.provider} ${intent.ticker} contract on BSC. Refresh discovery or explicitly select a representation with verified metadata; no trade was sent.`);
+    if(!Number.isFinite(Number(metadata.tokenToShareRatio)) || Number(metadata.tokenToShareRatio)<=0 || typeof metadata.statusInfo?.openState!=='boolean') throw new Error('Verified share ratio and reference-market state are unavailable for this stock.');
     if(/halt|pause|suspend|corporate|maintenance/i.test(`${metadata.statusInfo.reasonCode} ${metadata.statusInfo.reasonMsg||''}`))throw new Error('This stock has a trading halt or corporate-action restriction. No order will be submitted.');
     let funds:Awaited<ReturnType<typeof walletFunds>>|undefined;
     if(selling){

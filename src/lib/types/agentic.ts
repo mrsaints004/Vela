@@ -1,6 +1,6 @@
 export interface AgenticSettings {
   dailyLimit:number;quotaLeft:number;quotaUsed:number;quotaDate:string;tradeAllTokens:boolean;abnormalTxnHandling:string;sessionExpireTime:string;
-  devMode:{enabled:boolean;expiresAt:number|null;dailyLimit:number;balanceExceeded:boolean};developerModeQuotaUsed:number;
+  devMode:{enabled:boolean;expiresAt:number|null;expired?:boolean;dailyLimit:number;balanceExceeded:boolean};developerModeQuotaUsed:number;
 }
 export interface AgenticStatus {installed:boolean;connected:boolean;status:string;version?:string;address:string|null;settings:AgenticSettings|null;lock:string|null;error?:string;}
 export interface AgenticSigningPreview {

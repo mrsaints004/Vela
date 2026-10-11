@@ -4,6 +4,7 @@ import type { PolicyEvaluation, PolicyResult } from "@/lib/types";
 import { Check, AlertTriangle, X, Shield, Zap, ShieldOff } from "lucide-react";
 
 interface RiskFlagsProps {
+  approvalRequired?: boolean;
   policy?: PolicyResult | null;
   policyEvaluation?: PolicyEvaluation | null;
 }
@@ -26,10 +27,10 @@ const STATUS_BG = {
   fail: "bg-loss/5",
 };
 
-export function RiskFlags({ policy, policyEvaluation }: RiskFlagsProps) {
+export function RiskFlags({ policy, policyEvaluation, approvalRequired=false }: RiskFlagsProps) {
   // Use V2 policy evaluation if available, fall back to legacy
   if (policyEvaluation) {
-    return <PolicyEvaluationView evaluation={policyEvaluation} />;
+    return <PolicyEvaluationView evaluation={policyEvaluation} approvalRequired={approvalRequired} />;
   }
   if (policy && policy.checks.length > 0) {
     return <LegacyPolicyView policy={policy} />;
@@ -37,7 +38,7 @@ export function RiskFlags({ policy, policyEvaluation }: RiskFlagsProps) {
   return null;
 }
 
-function PolicyEvaluationView({ evaluation }: { evaluation: PolicyEvaluation }) {
+function PolicyEvaluationView({ evaluation,approvalRequired }: { evaluation: PolicyEvaluation;approvalRequired:boolean }) {
   const passCount = evaluation.checks.filter((c) => c.status === "pass").length;
   const totalChecks = evaluation.checks.length;
 
@@ -94,8 +95,8 @@ function PolicyEvaluationView({ evaluation }: { evaluation: PolicyEvaluation }) 
       <div className="px-4 py-2.5 border-t border-border">
         {evaluation.action === "block" ? (
           <div className="flex items-center gap-1.5">
-            <ShieldOff className="w-3 h-3 text-loss" />
-            <span className="text-xs text-loss">Execution blocked — policy violation</span>
+            {approvalRequired?<AlertTriangle className="w-3 h-3 text-warning" />:<ShieldOff className="w-3 h-3 text-loss" />}
+            <span className={approvalRequired?"text-xs text-warning":"text-xs text-loss"}>{approvalRequired?"Token approval required":"Execution blocked — policy violation"}</span>
           </div>
         ) : evaluation.canExecuteAutonomously ? (
           <div className="flex items-center gap-1.5">
